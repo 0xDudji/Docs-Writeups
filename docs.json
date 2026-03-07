@@ -1,122 +1,270 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "theme": "linden",
+  "name": "Dudji's Docs",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#d5363e",
+    "light": "#e05560",
+    "dark": "#b02a32"
   },
-  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "dark",
+    "decorations": {
+      "background": "grid"
+    }
+  },
+  "background": {
+    "decoration": "windows",
+    "color": {
+      "dark": "#060606"
+    }
+  },
+  "styling": {
+    "codeblocks": {
+      "theme": {
+        "dark": "tokyo-night",
+        "light": "github-light"
+      }
+    }
+  },
+  "favicon": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "custom": {
+    "css": "/custom.css"
+  },
+  "seo": {
+    "indexHiddenPages": false
+  },
+  "fonts": {
+    "body": { "family": "JetBrains Mono" },
+    "heading": { "family": "JetBrains Mono" }
+  },
+  "routing": {
+    "prefix": "/docs"
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Home",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Home",
+            "pages": ["index"]
+          }
+        ]
+      },
+      {
+        "tab": "Playbook",
+        "url": "playbook/index",
+        "groups": [
+          {
+            "group": "Playbook",
+            "root": "playbook/index",
+            "pages": []
+          },
+          {
+            "group": "Recon",
+            "root": "playbook/recon/index",
+            "pages": []
+          },
+          {
+            "group": "Enumeration",
+            "root": "playbook/enumeration/index",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "playbook/enumeration/web-enumeration"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Exploitation",
+            "root": "playbook/exploitation/index",
+            "pages": []
+          },
+          {
+            "group": "Post-Exploitation",
+            "root": "playbook/post-exploitation/index",
+            "pages": []
+          }
+        ]
+      },
+      {
+        "tab": "Attacks",
+        "url": "attacks/index",
+        "groups": [
+          {
+            "group": "Attacks",
+            "root": "attacks/index",
+            "pages": []
+          },
+          {
+            "group": "Web",
+            "root": "attacks/web/index",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "attacks/web/local-file-inclusion",
+              {
+                "group": "SQL Injection",
+                "root": "attacks/web/sql-injection",
+                "pages": [
+                  "attacks/web/sql-injection/sql-injection-union-attacks",
+                  "attacks/web/sql-injection/blind-sql-injection"
+                ]
+              }
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Privilege Escalation",
+            "root": "attacks/privilege-escalation/index",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "attacks/privilege-escalation/linux",
+              "attacks/privilege-escalation/windows"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Tech",
+        "url": "tech/index",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Tech",
+            "root": "tech/index",
+            "pages": []
+          },
+          {
+            "group": "Linux",
+            "root": "tech/linux/index",
             "pages": [
-              "api-reference/introduction"
+              "tech/linux/system-fundamentals",
+              "tech/linux/authentication-authorization",
+              "tech/linux/system-services",
+              "tech/linux/storage-devices"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Payloads",
+        "url": "payloads/index",
+        "groups": [
+          {
+            "group": "Payloads",
+            "root": "payloads/index",
+            "pages": [
+              "payloads/reverse-shells",
+              "payloads/web-shells",
+              "payloads/file-transfers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tools",
+        "url": "tools/index",
+        "groups": [
+          {
+            "group": "Tools",
+            "root": "tools/index",
+            "pages": [
+              "tools/nmap",
+              "tools/burp-suite",
+              "tools/metasploit"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Writeups",
+        "url": "writeups/index",
+        "groups": [
+          {
+            "group": "Writeups",
+            "root": "writeups/index",
+            "pages": []
+          },
+          {
+            "group": "Machines",
+            "root": "writeups/machines/index",
+            "pages": [
+              {
+                "group": "HTB - Seasonal",
+                "root": "writeups/machines/HTB-Seasonal/index",
+                "pages": [
+                  {
+                    "group": "Season 10",
+                    "root": "writeups/machines/HTB-Seasonal/Season-10/index",
+                    "pages": [
+                      {
+                        "group": "Interpreter",
+                        "root": "writeups/machines/HTB-Seasonal/Season-10/interpreter",
+                        "pages": [
+                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/enumeration",
+                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/foothold",
+                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/lateral-movement",
+                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/privilege-escalation"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
-            "group": "Endpoint examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
-            ]
+            "group": "Challenges",
+            "root": "writeups/Challenges/index",
+            "pages": []
+          },
+          {
+            "group": "CTFs",
+            "root": "writeups/CTFs/index",
+            "pages": []
           }
         ]
       }
     ],
     "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
+      "anchors": []
     }
   },
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+    "dark": "/logo/dark.svg",
+    "href": "https://dudji.com"
   },
   "footer": {
+    "links": [
+      {
+        "header": "Dudji",
+        "items": [
+          { "label": "Home", "href": "https://dudji.com" },
+          { "label": "Contact", "href": "https://dudji.com/contact" }
+        ]
+      },
+      {
+        "header": "Hackbook",
+        "items": [
+          { "label": "Playbook", "href": "/docs/playbook" },
+          { "label": "Attacks", "href": "/docs/attacks" },
+          { "label": "Tech", "href": "/docs/tech" },
+          { "label": "Payloads", "href": "/docs/payloads" },
+          { "label": "Tools", "href": "/docs/tools" }
+        ]
+      },
+      {
+        "header": "Writeups",
+        "items": [
+          { "label": "Machines", "href": "/docs/writeups/machines" },
+          { "label": "Challenges", "href": "/docs/writeups/challenges" },
+          { "label": "CTFs", "href": "/docs/writeups/ctfs" }
+        ]
+      }
+    ],
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "x": "https://x.com/dudji",
+      "linkedin": "https://linkedin.com/in/dudji",
+      "instagram": "https://instagram.com/dudji",
+      "github": "https://github.com/0xDudji"
     }
   }
 }
