@@ -1,4 +1,4 @@
-# Dudji's Hackbook
+# Writeups
 
 Personal security writeups and documentation. Detailed walkthroughs across CTF machines, challenges, and competitions.
 
