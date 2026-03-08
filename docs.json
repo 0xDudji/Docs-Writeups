@@ -41,180 +41,71 @@
     "body": { "family": "JetBrains Mono" },
     "heading": { "family": "JetBrains Mono" }
   },
-  "routing": {
-    "prefix": "/docs"
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Home",
+      "href": "https://Dudji.com"
+    }
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Home",
+        "tab": "Overview",
         "groups": [
           {
-            "group": "Home",
+            "group": "Overview",
             "pages": ["index"]
           }
         ]
       },
       {
-        "tab": "Playbook",
-        "url": "playbook/index",
+        "tab": "Machines",
+        "url": "writeups/machines/index",
         "groups": [
           {
-            "group": "Playbook",
-            "root": "playbook/index",
-            "pages": []
+            "group": "Overview",
+            "pages": ["writeups/machines/index"]
           },
           {
-            "group": "Recon",
-            "root": "playbook/recon/index",
-            "pages": []
-          },
-          {
-            "group": "Enumeration",
-            "root": "playbook/enumeration/index",
-            "pages": [
-              "playbook/enumeration/web-enumeration"
-            ]
-          },
-          {
-            "group": "Exploitation",
-            "root": "playbook/exploitation/index",
-            "pages": []
-          },
-          {
-            "group": "Post-Exploitation",
-            "root": "playbook/post-exploitation/index",
-            "pages": []
-          }
-        ]
-      },
-      {
-        "tab": "Attacks",
-        "url": "attacks/index",
-        "groups": [
-          {
-            "group": "Attacks",
-            "root": "attacks/index",
-            "pages": []
-          },
-          {
-            "group": "Web",
-            "root": "attacks/web/index",
-            "pages": [
-              "attacks/web/local-file-inclusion",
-              {
-                "group": "SQL Injection",
-                "root": "attacks/web/sql-injection",
-                "pages": [
-                  "attacks/web/sql-injection/sql-injection-union-attacks",
-                  "attacks/web/sql-injection/blind-sql-injection"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Privilege Escalation",
-            "root": "attacks/privilege-escalation/index",
-            "pages": [
-              "attacks/privilege-escalation/linux",
-              "attacks/privilege-escalation/windows"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Tech",
-        "url": "tech/index",
-        "groups": [
-          {
-            "group": "Tech",
-            "root": "tech/index",
-            "pages": []
-          },
-          {
-            "group": "Linux",
-            "root": "tech/linux/index",
-            "pages": [
-              "tech/linux/system-fundamentals",
-              "tech/linux/authentication-authorization",
-              "tech/linux/system-services",
-              "tech/linux/storage-devices"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Payloads",
-        "url": "payloads/index",
-        "groups": [
-          {
-            "group": "Payloads",
-            "root": "payloads/index",
-            "pages": [
-              "payloads/reverse-shells",
-              "payloads/web-shells",
-              "payloads/file-transfers"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Tools",
-        "url": "tools/index",
-        "groups": [
-          {
-            "group": "Tools",
-            "root": "tools/index",
-            "pages": [
-              "tools/nmap",
-              "tools/burp-suite",
-              "tools/metasploit"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Writeups",
-        "url": "writeups/index",
-        "groups": [
-          {
-            "group": "Writeups",
-            "root": "writeups/index",
-            "pages": []
-          },
-          {
-            "group": "Machines",
-            "root": "writeups/machines/index",
+            "group": "HackTheBox",
+            "root": "writeups/machines/HackTheBox/index",
             "pages": [
               {
-                "group": "HTB - Seasonal",
-                "root": "writeups/machines/HTB-Seasonal/index",
+                "group": "Season 10",
+                "root": "writeups/machines/HackTheBox/Season-10/index",
                 "pages": [
                   {
-                    "group": "Season 10",
-                    "root": "writeups/machines/HTB-Seasonal/Season-10/index",
+                    "group": "Interpreter",
+                    "root": "writeups/machines/HackTheBox/Season-10/interpreter",
                     "pages": [
-                      {
-                        "group": "Interpreter",
-                        "root": "writeups/machines/HTB-Seasonal/Season-10/interpreter",
-                        "pages": [
-                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/enumeration",
-                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/foothold",
-                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/lateral-movement",
-                          "writeups/machines/HTB-Seasonal/Season-10/interpreter/privilege-escalation"
-                        ]
-                      }
+                      "writeups/machines/HackTheBox/Season-10/interpreter/enumeration",
+                      "writeups/machines/HackTheBox/Season-10/interpreter/foothold",
+                      "writeups/machines/HackTheBox/Season-10/interpreter/lateral-movement",
+                      "writeups/machines/HackTheBox/Season-10/interpreter/privilege-escalation"
                     ]
                   }
                 ]
               }
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "Challenges",
+        "url": "writeups/Challenges/index",
+        "groups": [
           {
             "group": "Challenges",
             "root": "writeups/Challenges/index",
             "pages": []
-          },
+          }
+        ]
+      },
+      {
+        "tab": "CTFs",
+        "url": "writeups/CTFs/index",
+        "groups": [
           {
             "group": "CTFs",
             "root": "writeups/CTFs/index",
@@ -238,26 +129,27 @@
         "header": "Dudji",
         "items": [
           { "label": "Home", "href": "https://dudji.com" },
-          { "label": "Contact", "href": "https://dudji.com/contact" }
+          { "label": "Contact", "href": "https://dudji.com/contact" },
+          { "label": "Hackbook", "href": "https://Hackbook.Dudji.com" },
+          { "label": "Books", "href": "https://Books.Dudji.com" }
         ]
       },
       {
-        "header": "Hackbook",
+        "header": "Machines",
         "items": [
-          { "label": "Playbook", "href": "/docs/playbook" },
-          { "label": "Attacks", "href": "/docs/attacks" },
-          { "label": "Tech", "href": "/docs/tech" },
-          { "label": "Payloads", "href": "/docs/payloads" },
-          { "label": "Tools", "href": "/docs/tools" }
+          {
+            "label": "HackTheBox",
+            "href": "/writeups/machines/HackTheBox/index"
+          }
         ]
       },
       {
-        "header": "Writeups",
-        "items": [
-          { "label": "Machines", "href": "/docs/writeups/machines" },
-          { "label": "Challenges", "href": "/docs/writeups/challenges" },
-          { "label": "CTFs", "href": "/docs/writeups/ctfs" }
-        ]
+        "header": "Challenges",
+        "items": [{ "label": "Coming soon", "href": "/writeups/Challenges" }]
+      },
+      {
+        "header": "CTFs",
+        "items": [{ "label": "Coming soon", "href": "/writeups/CTFs" }]
       }
     ],
     "socials": {
