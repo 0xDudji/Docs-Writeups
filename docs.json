@@ -3,20 +3,20 @@
   "theme": "linden",
   "name": "Dudji's Docs",
   "colors": {
-    "primary": "#d5363e",
-    "light": "#e05560",
-    "dark": "#b02a32"
+    "primary": "#00ff41",
+    "light": "#39ff6e",
+    "dark": "#00d936"
   },
   "appearance": {
     "default": "dark",
     "decorations": {
-      "background": "grid"
+      "background": "none"
     }
   },
   "background": {
-    "decoration": "windows",
+    "decoration": "grid",
     "color": {
-      "dark": "#060606"
+      "dark": "#000000"
     }
   },
   "styling": {
