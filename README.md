@@ -1,4 +1,4 @@
-# Writeups
+# My writeups
 
 Personal security writeups and documentation. Detailed walkthroughs across CTF machines, challenges, and competitions.
 
