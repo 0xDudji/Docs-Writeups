@@ -128,10 +128,10 @@
       {
         "header": "Dudji",
         "items": [
-          { "label": "Home", "href": "https://dudji.com" },
-          { "label": "Contact", "href": "https://dudji.com/contact" },
+          { "label": "Home", "href": "https://Dudji.com" },
+          { "label": "Contact", "href": "https://Dudji.com/contact" },
           { "label": "Hackbook", "href": "https://Hackbook.Dudji.com" },
-          { "label": "Books", "href": "https://Books.Dudji.com" }
+          { "label": "Academy", "href": "https://Academy.dudji.com" }
         ]
       },
       {
