@@ -112,6 +112,41 @@
             "pages": []
           }
         ]
+      },
+      {
+        "tab": "Sherlocks",
+        "url": "writeups/Sherlocks/index",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["writeups/Sherlocks/index"]
+          },
+          {
+            "group": "DFIR",
+            "root": "writeups/Sherlocks/dfir/index",
+            "pages": []
+          },
+          {
+            "group": "SOC",
+            "root": "writeups/Sherlocks/soc/index",
+            "pages": []
+          },
+          {
+            "group": "Malware Analysis",
+            "root": "writeups/Sherlocks/malware-analysis/index",
+            "pages": []
+          },
+          {
+            "group": "Threat Hunting",
+            "root": "writeups/Sherlocks/threat-hunting/index",
+            "pages": []
+          },
+          {
+            "group": "Cloud",
+            "root": "writeups/Sherlocks/cloud/index",
+            "pages": []
+          }
+        ]
       }
     ],
     "global": {
@@ -135,21 +170,13 @@
         ]
       },
       {
-        "header": "Machines",
+        "header": "Topics",
         "items": [
-          {
-            "label": "HackTheBox",
-            "href": "/writeups/machines/HackTheBox/index"
-          }
+          { "label": "Machines", "href": "/writeups/machines" },
+          { "label": "Sherlocks", "href": "/writeups/Sherlocks" },
+          { "label": "Challenges", "href": "/writeups/Challenges" },
+          { "label": "CTFs", "href": "/writeups/CTFs" }
         ]
-      },
-      {
-        "header": "Challenges",
-        "items": [{ "label": "Coming soon", "href": "/writeups/Challenges" }]
-      },
-      {
-        "header": "CTFs",
-        "items": [{ "label": "Coming soon", "href": "/writeups/CTFs" }]
       }
     ],
     "socials": {
