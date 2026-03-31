@@ -1,35 +1,35 @@
----
-title: "Vantage"
-description: "HTB Sherlock Vantage forensic investigation writeup (DFIR / Network Forensics)."
----
+﻿# Vantage - HTB Sherlock Writeup (DFIR / Network Forensics)
 
 ## Challenge Description
 
-> A small company moved some of its resources to a private cloud installation. The developers left the redirect to the dashboard on their web server. The security team got an email from the alleged attacker stating that the user data was leaked. It is up to you to investigate the situation.
+> A small company moved some of its resources to a private cloud installation. The developers left
+> the redirect to the dashboard on their web server. The security team got an email from the alleged
+> attacker stating that the user data was leaked. It is up to you to investigate the situation.
 
 **Difficulty:** Very Easy  
 **Category:** DFIR / Network Forensics  
 **Evidence Files:** `web-server_2025-07-01.pcap` (15 MB), `controller_2025-07-01.pcap` (6.9 MB)
 
-![Vantage attack flow diagram](/images/sherlocks/vantage/attack-flow.svg)
-
 ---
 
 ## Initial Analysis Methodology
 
-Before diving into the challenge questions, the goal is to understand what happened using only the evidence. This section walks through a repeatable approach you can apply to any unknown PCAP - the same steps, in the same order, every time.
+Before diving into the challenge questions, the goal is to understand what happened using only the
+evidence. This section walks through a repeatable approach you can apply to any unknown PCAP - the
+same steps, in the same order, every time.
 
-We have two PCAP files from two different machines. We don't know yet what those machines are, how they relate to each other, or what happened. The methodology below will answer all three.
+We have two PCAP files from two different machines. We don't know yet what those machines are, how
+they relate to each other, or what happened. The methodology below will answer all three.
 
 ---
 
 ### Step 1 - Protocol Hierarchy: What kind of machines are these?
 
-The very first thing to do with any unknown PCAP is find out what protocols it contains. This tells you what kind of machine was captured and what kind of activity to expect - before you read a single packet.
+The very first thing to do with any unknown PCAP is find out what protocols it contains. This tells
+you what kind of machine was captured and what kind of activity to expect - before you read a single
+packet.
 
 **Wireshark:** `Statistics > Protocol Hierarchy`
-
-![Wireshark protocol hierarchy walkthrough](/images/sherlocks/vantage/wireshark-step-1-protocol-hierarchy.svg)
 
 #### 📁 web-server_2025-07-01.pcap
 
@@ -41,7 +41,17 @@ Open the web-server PCAP first and go to `Statistics > Protocol Hierarchy`. Here
 | HTTP                  | 7,482  | A web server - this is almost entirely HTTP            |
 | HTML Form URL Encoded | 8      | **Only 8 form submissions out of 7,482 HTTP requests** |
 
-**Why the 8 form submissions matter:** The content type `application/x-www-form-urlencoded` is what browsers send when you submit a login form via POST. Out of 7,482 HTTP requests, only 8 were form POSTs - meaning the vast majority of traffic was automated GETs (scanning/fuzzing), and only a handful were deliberate human interactions (login attempts). That ratio is the first red flag, and you've spotted it without reading a single packet.
+**Why the 8 form submissions matter:** The content type `application/x-www-form-urlencoded` is what
+browsers send when you submit a login form via POST. Out of 7,482 HTTP requests, only 8 were form
+POSTs - meaning the vast majority of traffic was automated GETs (scanning/fuzzing), and only a
+handful were deliberate human interactions (login attempts). That ratio is the first red flag, and
+you've spotted it without reading a single packet.
+
+**Why 8 and not 4?** You might expect 4 login attempts = 4 POSTs. The count is doubled because this
+machine acts as a **reverse proxy**: it captures both the external POST from the attacker
+(`117.200.21.26 to 157.230.81.229`) and the internally forwarded POST from proxy to backend app
+(`10.116.0.3 to 10.116.0.4`). Each login attempt is seen twice in the one capture file. This matters
+in Step 5 when we filter for login packets.
 
 #### 📁 controller_2025-07-01.pcap
 
@@ -55,26 +65,34 @@ Now open the controller PCAP and check the same view:
 | Data on port 2379  | 1,418  | etcd - distributed key-value store |
 | Data on port 11211 | -      | memcached - in-memory cache        |
 
-**What can we say from this?** The protocol hierarchy alone does _not_ tell you what platform this machine runs. HTTP + MySQL + AMQP + etcd + memcached could be many things - a Django app with Celery workers, a Kubernetes control plane, or any message-driven platform with a database backend.
+**What can we say from this?** The protocol hierarchy alone does _not_ tell you what platform this
+machine runs. HTTP + MySQL + AMQP + etcd + memcached could be many things - a Django app with Celery
+workers, a Kubernetes control plane, or any message-driven platform with a database backend.
 
-What it _does_ tell you is the general shape of this machine: it's an **application controller node** - something that exposes a REST API, stores state in a relational database, coordinates work through a message queue, and uses an in-memory cache. That's a useful narrowing. We can't be more specific yet - the actual platform will become clear later when we start reading the HTTP request paths and response content.
+What it _does_ tell you is the general shape of this machine: it's an **application controller
+node** - something that exposes a REST API, stores state in a relational database, coordinates work
+through a message queue, and uses an in-memory cache. That's a useful narrowing. The actual platform
+will become clear in Step 3 when we read the HTTP request paths.
 
-**The takeaway after Step 1:** We have a _web server_ (almost entirely HTTP) and a _multi-service controller node_ (API + database + message queue + cache). These are two different machines in the same infrastructure, and the web-server PCAP is the one with the suspicious traffic volume - so that's where we'll focus next.
+**The takeaway after Step 1:** We have a _web server / reverse proxy_ (almost entirely HTTP) and a
+_multi-service controller node_ (API + database + message queue + cache). The web-server PCAP has the
+suspicious traffic volume, so that's where we focus next.
 
 ---
 
 ### Step 2 - Endpoints & Conversations: Who's talking, and how much?
 
-Now we have a rough picture of each machine. Next question: _who is communicating with them_, and is any of that traffic abnormal?
+Now we have a rough picture of each machine. Next question: _who is communicating with them_, and is
+any of that traffic abnormal?
 
 There are two related views in Wireshark that answer this differently:
 
-- **`Statistics > Endpoints > IPv4`** - One row per IP, total packets aggregated across all connections. Best for quickly identifying dominant talkers.
-- **`Statistics > Conversations > TCP`** - One row per TCP stream (unique source port ↔ destination port pair). Best for understanding _how_ the traffic is structured.
+- **`Statistics > Endpoints > IPv4`** - One row per IP, total packets aggregated across all
+  connections. Best for quickly identifying dominant talkers.
+- **`Statistics > Conversations > TCP`** - One row per TCP stream (unique source port to destination
+  port pair). Best for understanding _how_ the traffic is structured.
 
 **Start with Endpoints for triage, then drill into Conversations for detail.**
-
-![Wireshark endpoints and conversations walkthrough](/images/sherlocks/vantage/wireshark-step-2-conversations.svg)
 
 #### 📁 web-server_2025-07-01.pcap - Endpoints view
 
@@ -88,26 +106,38 @@ Open `Statistics > Endpoints > IPv4 tab` and sort by the **Packets** column (des
 | 10.116.0.4        | 256        | 1.2%       | Internal IP               |
 | 60+ other IPs     | 2–243 each | under 1%   | Internet background noise |
 
-**The red flag is immediate:** One external IP - `117.200.21.26` - accounts for 97.9% of all traffic. Every other external IP has negligible volume. That ratio alone identifies the attacker before you've looked at a single HTTP request.
+**The red flag is immediate:** One external IP - `117.200.21.26` - accounts for 97.9% of all
+traffic. Every other external IP has negligible volume. That ratio alone identifies the attacker
+before you've looked at a single HTTP request.
 
 #### 📁 web-server_2025-07-01.pcap - Conversations view
 
-Now switch to `Statistics > Conversations > TCP tab` to understand how that traffic is structured. You'll see approximately **187 rows** from `117.200.21.26`, all connecting to `157.230.81.229:80`, each from a different source port:
+Now switch to `Statistics > Conversations > TCP tab` to understand how that traffic is structured.
+You'll see approximately **187 rows** from `117.200.21.26`, all connecting to `157.230.81.229:80`,
+each from a different source port:
 
-| Address A                         | ↔   | Address B         | Packets | Duration |
-| --------------------------------- | --- | ----------------- | ------- | -------- |
-| 117.200.21.26:**64728**           | ↔   | 157.230.81.229:80 | 497     | 22.6s    |
-| 117.200.21.26:**64727**           | ↔   | 157.230.81.229:80 | 489     | 22.7s    |
-| 117.200.21.26:**64756**           | ↔   | 157.230.81.229:80 | 487     | 22.6s    |
-| _... 184 more rows like this ..._ |     |                   |         |          |
+| Address A               | Direction | Address B         | Packets | Duration |
+| ----------------------- | --------- | ----------------- | ------- | -------- |
+| 117.200.21.26:**64728** | to        | 157.230.81.229:80 | 497     | 22.6s    |
+| 117.200.21.26:**64727** | to        | 157.230.81.229:80 | 489     | 22.7s    |
+| 117.200.21.26:**64756** | to        | 157.230.81.229:80 | 487     | 22.6s    |
+| _... 184 more rows ..._ |           |                   |         |          |
 
-**What this pattern means:** 187 parallel TCP connections, all nearly identical in duration (~22 seconds) and packet count (~480–500), all hitting port 80. This is not a human browsing - this is a _tool running concurrent threads_. Each thread opens its own TCP connection to fire HTTP requests in parallel. Tools like ffuf, gobuster, and dirsearch all behave exactly this way.
+**What this pattern means:** 187 parallel TCP connections, all nearly identical in duration (~22
+seconds) and packet count (~480–500), all hitting port 80. This is not a human browsing - this is a
+_tool running concurrent threads_. Each thread opens its own TCP connection to fire HTTP requests in
+parallel. Tools like ffuf, gobuster, and dirsearch all behave exactly this way.
 
-There are also ~10 smaller streams from `10.116.0.3 > 10.116.0.4:80` with much less traffic (~250 packets total). These two internal IPs have nearly identical packet counts in the Endpoints view, and their timing aligns with the external wave - this is the hallmark of a reverse proxy chain (e.g., Nginx/HAProxy fronting a backend app server).
+There are also ~10 smaller streams between `10.116.0.3` and `10.116.0.4:80`. These two internal IPs
+have nearly identical packet counts in the Endpoints view, and their timing aligns with the external
+wave - this is the hallmark of a reverse proxy chain (e.g., Nginx or Apache fronting a backend app
+server).
 
 #### 📁 controller_2025-07-01.pcap - What about this one?
 
-We'll come back to the controller PCAP after we understand the web-server traffic. The methodology is: **follow the attacker's footsteps in order**. The web server is where the attack started, the controller is where it escalated. Analyzing them chronologically tells a coherent story.
+We'll come back to the controller PCAP after we understand the web-server traffic. The methodology
+is: **follow the attacker's footsteps in order**. The web server is where the attack started, the
+controller is where it escalated. Analysing them chronologically tells a coherent story.
 
 ---
 
@@ -121,9 +151,8 @@ We've identified `117.200.21.26` as suspicious. Now let's see _exactly_ what the
 http.request && ip.src == 117.200.21.26
 ```
 
-![Wireshark HTTP filter walkthrough](/images/sherlocks/vantage/wireshark-step-3-filter-http.svg)
-
-**Tip:** To make the packet list more readable, add custom columns. Right-click any column header > `Column Preferences` > add:
+**Tip:** To make the packet list more readable, add custom columns. Right-click any column header >
+`Column Preferences` > add:
 
 - `http.host` (titled "Host")
 - `http.request.uri` (titled "URI")
@@ -137,7 +166,6 @@ With those columns visible, the pattern jumps out immediately:
 | 1031  | 2.vantage.tech              | GET    | /                      |
 | 1038  | a.vantage.tech              | GET    | /                      |
 | 1052  | abc.vantage.tech            | GET    | /                      |
-| 1059  | about.vantage.tech          | GET    | /                      |
 | ...   | _3,579 unique subdomains_   | GET    | /                      |
 | 1072  | cloud.vantage.tech          | GET    | /                      |
 | -     | _(User-Agent changes here)_ |        |                        |
@@ -147,10 +175,18 @@ With those columns visible, the pattern jumps out immediately:
 
 **Two distinct phases are visible:**
 
-1. **Fuzzing phase:** Thousands of GETs, each to a different `*.vantage.tech` subdomain, all requesting `/`. The Host header cycles through a wordlist alphabetically. This is subdomain enumeration.
-2. **Exploitation phase:** The Host locks onto `cloud.vantage.tech` and the attacker starts browsing the dashboard manually - navigating to the login page, submitting POST requests.
+1. **Fuzzing phase:** Thousands of GETs, each to a different `*.vantage.tech` subdomain, all
+   requesting `/`. The Host header cycles through a wordlist alphabetically. This is subdomain
+   enumeration.
+2. **Exploitation phase:** The Host locks onto `cloud.vantage.tech` and the attacker starts browsing
+   the dashboard manually - navigating to the login page, submitting POST requests.
 
-**And here's where the platform reveals itself.** While scrolling through the exploitation-phase requests, you'll spot URIs like `/dashboard/i18n/js/horizon+openstack_dashboard/`. That path literally contains the words `horizon` (OpenStack's web dashboard) and `openstack_dashboard`. Remember the controller PCAP from Step 1 that we couldn't identify beyond "application controller node"? Now we know - this is an **OpenStack** deployment. The web server is fronting an OpenStack Horizon dashboard, and the controller is the OpenStack control plane behind it.
+**And here's where the platform reveals itself.** While scrolling through the exploitation-phase
+requests, you'll spot URIs like `/dashboard/i18n/js/horizon+openstack_dashboard/`. That path
+literally contains the words `horizon` (OpenStack's web dashboard) and `openstack_dashboard`.
+Remember the controller PCAP from Step 1 that we couldn't identify beyond "application controller
+node"? Now we know - this is an **OpenStack** deployment. The web server is fronting an OpenStack
+Horizon dashboard, and the controller is the OpenStack control plane behind it.
 
 The transition between phases is also visible in the User-Agent column (which we'll examine next).
 
@@ -158,20 +194,23 @@ The transition between phases is also visible in the User-Agent column (which we
 
 ### Step 4 - Check User-Agents: What tools were used?
 
-User-Agent strings are one of the quickest wins in web traffic analysis. Legitimate browsers all send `Mozilla/5.0...` headers. Attack tools often identify themselves - either by name or by sending unusual/missing User-Agents.
+User-Agent strings are one of the quickest wins in web traffic analysis. Legitimate browsers all send
+`Mozilla/5.0...` headers. Attack tools often identify themselves - either by name or by sending
+unusual/missing User-Agents.
 
-**Wireshark (in `web-server_2025-07-01.pcap`):** Click any packet from the fuzzing phase, expand `Hypertext Transfer Protocol > User-Agent` in the packet detail pane.
-
-![Wireshark user-agent inspection walkthrough](/images/sherlocks/vantage/wireshark-step-4-user-agent.svg)
+**Wireshark (in `web-server_2025-07-01.pcap`):** Click any packet from the fuzzing phase, expand
+`Hypertext Transfer Protocol > User-Agent` in the packet detail pane.
 
 Two User-Agents appear from the attacker's IP:
 
-| Phase                | User-Agent                         | Meaning                                |
-| -------------------- | ---------------------------------- | -------------------------------------- |
-| Fuzzing (3,579 GETs) | `Fuzz Faster U Fool v2.1.0-dev`    | **ffuf** - a Go-based web fuzzing tool |
-| Manual browsing      | `Mozilla/5.0 ... Chrome/137.0.0.0` | Real Chrome browser                    |
+| Phase                | User-Agent                                                                                             | Meaning                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| Fuzzing (3,695 reqs) | `Fuzz Faster U Fool v2.1.0-dev`                                                                        | **ffuf** - a Go-based web fuzzing tool |
+| Manual browsing      | `Mozilla/5.0 (Macintosh Intel Mac OS X 10_15_7) AppleWebKit/537.36 ... Chrome/137.0.0.0 Safari/537.36` | Real Chrome browser on macOS           |
 
-**The pivot moment:** The switch from ffuf to Chrome is the exact moment the attacker discovered `cloud.vantage.tech` returned something interesting (the Horizon dashboard we identified in Step 3) and decided to explore it manually.
+**The pivot moment:** The switch from ffuf to Chrome is the exact moment the attacker discovered
+`cloud.vantage.tech` returned something interesting (the Horizon dashboard) and decided to explore it
+manually.
 
 To filter for just the non-browser traffic:
 
@@ -179,61 +218,143 @@ To filter for just the non-browser traffic:
 http.user_agent && !(http.user_agent contains "Mozilla")
 ```
 
-This isolates every request made by tools rather than browsers - useful for quickly spotting automated activity in any PCAP.
+This isolates every request made by tools rather than browsers - useful for quickly spotting
+automated activity in any PCAP.
 
 ---
 
 ### Step 5 - Follow TCP Streams: Read the full conversations
 
-So far we've been looking at metadata - source IPs, URIs, User-Agents. Now we need to see the actual _content_ of the most interesting requests: what credentials were submitted, what files were downloaded, what the server responded with.
+So far we've been looking at metadata - source IPs, URIs, User-Agents. Now we need to see the actual
+_content_ of the most interesting requests: what credentials were submitted, what files were
+downloaded, what the server responded with.
 
-**Wireshark (in `web-server_2025-07-01.pcap`):** Right-click any login POST packet > `Follow > TCP Stream`
+#### Reading the login attempts
 
-![Wireshark follow TCP stream walkthrough](/images/sherlocks/vantage/wireshark-step-5-follow-stream.svg)
-
-This reconstructs the full HTTP conversation - the complete request (red text) and the complete response (blue text) - in a readable window. For the login POSTs, the form data is visible in cleartext:
-
-```
-POST /dashboard/auth/login/ HTTP/1.1
-Host: cloud.vantage.tech
-Content-Type: application/x-www-form-urlencoded
-
-username=admin&password=StrongAdminSecret&region=default
-```
-
-**How to tell success from failure without reading the HTML:** Look at the HTTP response code. For most web login forms:
-
-- **HTTP 200 OK** = the server re-rendered the login page > **login failed**
-- **HTTP 302 Found** (redirect to dashboard) > **login succeeded**
-
-You can check this by looking at the response in the TCP stream, or by filtering for responses:
+**Wireshark filter (in `web-server_2025-07-01.pcap`):**
 
 ```
-http.response && ip.dst == 10.116.0.3
+http.request.method == POST && http.request.uri contains "/dashboard/auth/login" && ip.src == 117.200.21.26
 ```
 
-The 302 redirect is the one to focus on - that's the successful login.
+> **Why the `ip.src` clause is essential:** If you omit `&& ip.src == 117.200.21.26`, this filter
+> returns **8 packets, not 4**. Because the web-server PCAP captures a reverse proxy, every request
+> from the attacker to the proxy (`117.200.21.26 to 157.230.81.229`) is also captured as an
+> internally forwarded request (`10.116.0.3 to 10.116.0.4`). Each login attempt appears twice. Adding
+> `ip.src == 117.200.21.26` limits results to the original attacker-side requests only.
 
-**Also follow the OpenRC download stream:** Filter for `http.request.uri contains "openrc"`, then Follow TCP Stream on that packet. The response contains the downloaded `admin-openrc.sh` file:
+This gives you exactly **4 POST packets** - one per login attempt. Click the first one, then
+right-click > **Follow > TCP Stream**.
+
+The stream reconstructs the full HTTP conversation - the complete request (shown in red) and the
+complete response (shown in blue). The POST body is URL-encoded. Here is what you will actually see
+(line-wrapped for readability):
+
+```
+csrfmiddlewaretoken=UX4dve2DwuDo171EEgnpZaxni395EA5ijYsOoOoHwPUbGqAOKcR7Y4qns2yWIb74
+&fake_email=
+&fake_password=
+&next=%2Fdashboard%2F
+&region=default
+&username=admin
+&password=admin
+```
+
+**What each field means:**
+
+- `csrfmiddlewaretoken` - Django's Cross-Site Request Forgery protection token. It changes with
+  every session. Ignore it.
+- `fake_email` / `fake_password` - Honeypot fields that OpenStack Horizon adds to its login form
+  to trip up naive credential-stuffing bots. They are always empty for a real browser submitting the
+  form. Ignore them.
+- `username` / `password` - The credentials you're looking for.
+- `region` - The OpenStack region name, always `default` here.
+
+**How to tell success from failure without reading the HTML:** Look at the HTTP response status line.
+For Horizon login forms:
+
+- **HTTP 200 OK** - The server re-rendered the login page. **Login failed**
+- **HTTP 302 Found** (redirect to `/dashboard/`). **Login succeeded**
+
+The response appears in the same TCP stream window, immediately after the blank line that ends the
+request. You can also filter for just the response codes:
+
+```
+tcp.stream == <stream_id> && http.response.code
+```
+
+(substitute `<stream_id>` with the stream number shown in the packet detail pane for the packet you
+clicked)
+
+| Attempt  | Credentials               | Response  | Result  |
+| -------- | ------------------------- | --------- | ------- |
+| 09:39:16 | admin / admin             | 200 OK    | Failed  |
+| 09:39:27 | demo / demo               | 200 OK    | Failed  |
+| 09:39:33 | root / root               | 200 OK    | Failed  |
+| 09:40:07 | admin / StrongAdminSecret | 302 Found | Success |
+
+#### Reading the OpenRC file download
+
+**Filter (in `web-server_2025-07-01.pcap`):**
+
+```
+http.request.uri contains "openrc" && ip.src == 117.200.21.26
+```
+
+One packet matches. Click it, right-click > **Follow > TCP Stream**.
+
+You'll see the request headers clearly, and the response headers, including a
+`Content-Disposition` header with filename `admin-openrc.sh`, which confirms the file name.
+However, the response body will display as binary garbage:
+
+```
+HTTP/1.1 200 OK
+...
+Content-Encoding: gzip
+...
+
+3dc
+...........lTm..H......+]..........B{\[@.\u:...
+```
+
+> **The response is gzip-compressed.** The server sends `Content-Encoding: gzip`, so the Follow TCP
+> Stream window shows the raw compressed bytes - not readable text. **Do not try to read the file
+> content from the TCP stream window.** This is the most common point of confusion for this task.
+
+To read the actual plaintext file, use Wireshark's built-in HTTP object export, which automatically
+decompresses gzip-encoded responses:
+
+1. Go to **File > Export Objects > HTTP...**
+2. In the list that appears, find the row with `admin-openrc.sh` in the Filename column.
+3. Click **Save** to write it to disk, then open it in a text editor.
+
+The decompressed content confirms everything we've identified so far:
 
 ```bash
+#!/usr/bin/env bash
+# To use an OpenStack cloud you need to authenticate against the Identity
+# service named keystone...
 export OS_AUTH_URL=http://134.209.71.220/identity
 export OS_PROJECT_ID=9fb84977ff7c4a0baf0d5dbb57e235c7
 export OS_PROJECT_NAME="admin"
 export OS_USERNAME="admin"
+export OS_REGION_NAME="RegionOne"
+export OS_IDENTITY_API_VERSION=3
 ```
 
-The file's comments also say _"To use an OpenStack cloud you need to authenticate against the Identity service named keystone"_ - further confirming what we identified in Step 3. More importantly, this file is the **bridge between the two PCAPs**: it tells the attacker the controller's IP address (`134.209.71.220`) and how to authenticate to it. Everything that happens in the controller PCAP after this moment is a consequence of this download.
+This file is the **bridge between the two PCAPs**: it gives the attacker the controller's IP address
+(`134.209.71.220`) and everything they need to authenticate directly to the OpenStack API. Everything
+that happens in the controller PCAP after this moment is a consequence of this download.
 
 ---
 
 ### Step 6 - Cross-Reference PCAPs: Connect the timeline
 
-This is where the two PCAP files merge into a single story. The question is: _does the activity in the web-server PCAP lead to activity in the controller PCAP?_
+This is where the two PCAP files merge into a single story. The question is: _does the activity in
+the web-server PCAP lead to activity in the controller PCAP?_
 
-**Method:** Compare timestamps. Open both files and look at when activity ends in one and begins in the other.
-
-![Wireshark timestamp correlation walkthrough](/images/sherlocks/vantage/wireshark-step-6-time-correlation.svg)
+**Method:** Compare timestamps. Open both files and look at when activity ends in one and begins in
+the other.
 
 #### 📁 web-server_2025-07-01.pcap - Last meaningful action
 
@@ -241,30 +362,49 @@ The attacker's last request is the OpenRC download at **09:40:29 UTC**.
 
 #### 📁 controller_2025-07-01.pcap - First new API activity
 
-Before 09:40:29, the controller PCAP contains API calls triggered by the Horizon dashboard session (when you browse the dashboard UI, it makes backend API calls automatically). These are "noise" - they happen for any logged-in user.
+Before 09:40:29, the controller PCAP contains API calls triggered by the Horizon dashboard session
+(when you browse the dashboard UI, it makes backend API calls automatically). These are "noise" -
+they happen for any logged-in user.
 
-The first _standalone_ API call - not triggered by the dashboard - is a `GET /identity` at **09:41:44 UTC**. This is the OpenStack CLI's initial service discovery request, which happens when you run your first `openstack` command after sourcing the RC file.
+The first _standalone_ API call - not triggered by the dashboard - is a `GET /identity` at
+**09:41:44 UTC**. This is the OpenStack CLI's initial service discovery request, which happens when
+you run your first `openstack` command after sourcing the RC file.
 
-**The 75-second gap** (09:40:29 > 09:41:44) is the attacker reading the OpenRC file, opening a terminal, running `source admin-openrc.sh`, entering the password, and executing their first command. The causal chain is clear.
+**The 75-second gap** (09:40:29 to 09:41:44) is the attacker reading the OpenRC file, opening a
+terminal, running `source admin-openrc.sh`, entering the password when prompted, and executing their
+first CLI command. The causal chain is clear.
 
-From this point, everything in `controller_2025-07-01.pcap` is the attacker using the OpenStack CLI directly. You can confirm this by checking the User-Agent on these requests - they carry `openstacksdk/4.6.0 keystoneauth1/5.11.1`, which is the OpenStack Python SDK identifying itself.
+From this point, everything in `controller_2025-07-01.pcap` is the attacker using the OpenStack CLI
+directly. You can confirm this by checking the User-Agent on these requests - they carry:
+
+```
+openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5
+```
+
+This is the OpenStack Python SDK identifying itself - not a browser, not the Horizon dashboard.
 
 **Filter (in `controller_2025-07-01.pcap`):**
 
 ```
-http.request && !(http.request.uri contains "keepalive") && frame.time >= "Jul 1, 2025 09:41:00"
+http.request && http.user_agent contains "openstacksdk"
 ```
 
-This shows the post-dashboard API calls, excluding the etcd keepalive noise that runs constantly in the background. You'll see:
+This isolates direct OpenStack CLI/API activity and avoids mixing in dashboard-generated traffic or
+background keepalive noise. You'll see the full sequence of attacker commands play out:
 
 1. Service and endpoint enumeration (`/identity/v3/services`, `/identity/v3/endpoints`)
-2. User listing (`/identity/v3/users`)
-3. Server/VM listing (`/compute/v2.1/servers/detail`)
-4. Swift container listing (`/v1/AUTH_.../` with `?format=json`)
-5. Individual file downloads (`user-details.csv`, `employee-details.csv`)
-6. User creation (`POST /identity/v3/users`) and role assignment (`PUT .../roles/...`)
+2. Individual service detail lookups (`/identity/v3/services/<uuid>` - one per service)
+3. User listing (`/identity/v3/users`)
+4. VM/server listing (`/compute/v2.1/servers/detail`)
+5. Swift container listing (`/v1/AUTH_9fb84977...?format=json`)
+6. Container contents listing (`/v1/AUTH_.../user-data?format=json`, `/v1/AUTH_.../employee-data?format=json`)
+7. File downloads (`user-details.csv`, `employee-details.csv`)
+8. Backdoor user creation (`POST /identity/v3/users`)
+9. Admin role assignment (`PUT /identity/v3/projects/.../users/.../roles/...`)
 
-Each of these is a separate `openstack` CLI command the attacker ran, and the timestamps show them executing sequentially - about 30–90 seconds apart - as the attacker explored the environment manually.
+Each of these is a separate `openstack` CLI command the attacker ran, and the timestamps show them
+executing sequentially - about 30–90 seconds apart - as the attacker explored the environment
+manually.
 
 ---
 
@@ -272,41 +412,47 @@ Each of these is a separate `openstack` CLI command the attacker ran, and the ti
 
 Every time you open an unknown PCAP, follow this sequence:
 
-1. **Protocol Hierarchy** > Tells you _what kind of machine_ this is
-2. **Endpoints** > Tells you _who's suspicious_ (disproportionate traffic volume)
-3. **Conversations** > Tells you _how_ the traffic is structured (parallelism, ports)
-4. **`http.request` filter** > Tells you _what they did_ (URIs, hosts, methods)
-5. **User-Agents** > Tells you _what tools they used_
-6. **Follow TCP Streams** > Tells you _the full content_ of interesting exchanges
-7. **Cross-reference timestamps** > Connects activity across multiple captures
+1. **Protocol Hierarchy** tells you _what kind of machine_ this is
+2. **Endpoints** tell you _who's suspicious_ (disproportionate traffic volume)
+3. **Conversations** tell you _how_ the traffic is structured (parallelism, ports)
+4. **Build protocol-specific filters** tell you _what they did_ (HTTP paths, DNS queries, SMB
+   shares, RDP sessions, etc.)
+5. **Inspect client/application metadata** tells you _what tool or app generated the traffic_
+   (User-Agent strings, protocol banners, client names, request patterns)
+6. **Reconstruct key sessions and relevant artifacts** tell you _the full content and sequence_ of
+   interesting exchanges (`Follow TCP Stream`, `File > Export Objects > HTTP` for compressed
+   responses, key request/response bodies)
+7. **Cross-reference timestamps across hosts/files** connects activity into one timeline and
+   separates cause from effect
 
-Each step narrows your focus. You go from "I have 24,000 packets" to a complete narrative of the attack, without needing to know the questions in advance.
+Each step narrows your focus. You go from "I have 24,000 packets" to a complete narrative of the
+attack, even when the protocol is not HTTP.
 
 ---
 
 ## Attack Timeline
 
-![Vantage incident timeline](/images/sherlocks/vantage/timeline.svg)
-
-| Time (UTC)  | Source PCAP | Event                                                                 |
-| ----------- | ----------- | --------------------------------------------------------------------- |
-| 09:38–09:40 | web-server  | Subdomain fuzzing with ffuf (3,579 subdomains tested)                 |
-| 09:39:07    | web-server  | Attacker discovers `cloud.vantage.tech`, switches to Chrome           |
-| 09:39:16    | web-server  | Login attempt: admin / admin > failed (HTTP 200)                      |
-| 09:39:27    | web-server  | Login attempt: demo / demo > failed (HTTP 200)                        |
-| 09:39:33    | web-server  | Login attempt: root / root > failed (HTTP 200)                        |
-| 09:40:07    | web-server  | Login attempt: admin / StrongAdminSecret > success (HTTP 302)         |
-| 09:40:29    | web-server  | Downloads admin-openrc.sh from API Access page                        |
-|             |             | _- 75-second gap: attacker sets up CLI -_                             |
-| 09:41:44    | controller  | First direct API call - OpenStack CLI service discovery               |
-| 09:41:45    | controller  | Enumerates services and endpoints via Keystone                        |
-| 09:42:02    | controller  | Lists all users via Keystone                                          |
-| 09:43:27    | controller  | Lists Swift containers (finds 3: dev-files, employee-data, user-data) |
-| 09:44:27    | controller  | Lists contents of user-data and employee-data containers              |
-| 09:45:23    | controller  | Downloads user-details.csv (28 PII records)                           |
-| 09:45:47    | controller  | Downloads employee-details.csv                                        |
-| 09:48:02    | controller  | Creates backdoor user "jellibean" with password "P@$$word"            |
-| 09:48:28    | controller  | Grants jellibean admin role on the project                            |
+| Time (UTC)  | Source PCAP | Event                                                                       |
+| ----------- | ----------- | --------------------------------------------------------------------------- |
+| 09:38–09:40 | web-server  | Subdomain fuzzing with ffuf (3,579 subdomains tested, 3,695 total requests) |
+| 09:39:07    | web-server  | Attacker discovers `cloud.vantage.tech`, switches to Chrome                 |
+| 09:39:16    | web-server  | Login attempt: admin / admin failed (HTTP 200)                              |
+| 09:39:27    | web-server  | Login attempt: demo / demo failed (HTTP 200)                                |
+| 09:39:33    | web-server  | Login attempt: root / root failed (HTTP 200)                                |
+| 09:40:07    | web-server  | Login attempt: admin / StrongAdminSecret succeeded (HTTP 302)               |
+| 09:40:29    | web-server  | Downloads admin-openrc.sh from API Access page                              |
+|             |             | _- 75-second gap: attacker reads file, sources it, enters password -_       |
+| 09:41:44    | controller  | First direct API call - OpenStack CLI service discovery (`GET /identity`)   |
+| 09:41:45    | controller  | Enumerates services and endpoints via Keystone                              |
+| 09:42:11    | controller  | Lists all users via Keystone (`GET /identity/v3/users`)                     |
+| 09:42:27    | controller  | Lists compute servers (`GET /compute/v2.1/servers/detail`)                  |
+| 09:43:27    | controller  | Lists Swift containers - finds 3: dev-files, employee-data, user-data       |
+| 09:43:47    | controller  | Lists contents of user-data container                                       |
+| 09:44:05    | controller  | Lists contents of employee-data container                                   |
+| 09:45:23    | controller  | Downloads user-details.csv (28 PII records)                                 |
+| 09:45:47    | controller  | Downloads employee-details.csv                                              |
+| 09:48:02    | controller  | Creates backdoor user "jellibean" with password "P@$$word"                  |
+| 09:49:15    | controller  | Grants jellibean admin role on the project                                  |
 
 ---
 
@@ -316,9 +462,11 @@ Each step narrows your focus. You go from "I have 24,000 packets" to a complete 
 
 **PCAP:** `web-server_2025-07-01.pcap`  
 **Filter:** `http.request && ip.src == 117.200.21.26`  
-**Where to look:** Click any packet > expand `Hypertext Transfer Protocol > User-Agent`
+**Where to look:** Click any packet from the early GETs to expand `Hypertext Transfer Protocol >
+User-Agent` in the packet detail pane.
 
-The User-Agent field reads `Fuzz Faster U Fool v2.1.0-dev` - this is ffuf, a popular web fuzzing tool written in Go.
+The User-Agent field reads `Fuzz Faster U Fool v2.1.0-dev` - this is ffuf, a popular web fuzzing
+tool written in Go.
 
 > **Answer:** `ffuf@2.1.0-dev`
 
@@ -329,7 +477,8 @@ The User-Agent field reads `Fuzz Faster U Fool v2.1.0-dev` - this is ffuf, a pop
 **PCAP:** `web-server_2025-07-01.pcap`  
 **Filter:** `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Chrome"`
 
-After the ffuf scan, the attacker switched to Chrome and manually browsed to the discovered subdomain. Every Chrome request targets the same Host header.
+After the ffuf scan, the attacker switched to Chrome and manually browsed to the discovered
+subdomain. Every Chrome request targets the same Host header value.
 
 > **Answer:** `cloud.vantage.tech`
 
@@ -338,9 +487,11 @@ After the ffuf scan, the attacker switched to Chrome and manually browsed to the
 ### Task 3: How many login attempts did the attacker make before successfully logging in?
 
 **PCAP:** `web-server_2025-07-01.pcap`  
-**Filter:** `http.request.method == POST && http.request.uri contains "/dashboard/auth/login"`
+**Filter:** `http.request.method == POST && http.request.uri contains "/dashboard/auth/login" && ip.src == 117.200.21.26`
 
-Four POST requests appear. The response codes distinguish success from failure: HTTP 200 means the login page was re-rendered (failed), while HTTP 302 redirect means authentication succeeded. The first three returned 200, the fourth returned 302.
+Four POST packets appear. The response codes distinguish success from failure: HTTP 200 means the
+login page was re-rendered (failed), while HTTP 302 means authentication succeeded and the server is
+redirecting to the dashboard. The first three returned 200, and the fourth returned 302.
 
 | Attempt      | Credentials               | Response  | Result  |
 | ------------ | ------------------------- | --------- | ------- |
@@ -356,11 +507,16 @@ Four POST requests appear. The response codes distinguish success from failure: 
 ### Task 4: When did the attacker download the OpenStack API remote access config file?
 
 **PCAP:** `web-server_2025-07-01.pcap`  
-**Filter:** `http.request.uri contains "openrc"`
+**Filter:** `http.request.uri contains "openrc" && ip.src == 117.200.21.26`
 
-The OpenRC file is a shell script that sets environment variables for OpenStack CLI authentication. The attacker downloaded it from `Project > API Access > Download OpenStack RC File` in the Horizon dashboard.
+The OpenRC file is a shell script that sets environment variables for OpenStack CLI authentication.
+The attacker downloaded it from `Project > API Access > Download OpenStack RC File` in the Horizon
+dashboard. The response header confirms the filename in `Content-Disposition` as `admin-openrc.sh`.
 
-Following the TCP stream (right-click > Follow > TCP Stream) shows the response with `Content-Disposition: attachment, filename="admin-openrc.sh"`, containing the auth URL (`http://134.209.71.220/identity`), the project ID, and the username. This is the file that bridges the two PCAPs - it gave the attacker everything they needed to pivot from the web server to direct API access on the controller.
+To read the file content itself, use **File > Export Objects > HTTP** (the response is
+gzip-compressed and unreadable in the Follow TCP Stream window). The decompressed file contains the
+auth URL (`http://134.209.71.220/identity`), the project ID, and the username - everything needed to
+pivot from the web server to direct API access on the controller.
 
 > **Answer:** `2025-07-01 09:40:29`
 
@@ -369,9 +525,12 @@ Following the TCP stream (right-click > Follow > TCP Stream) shows the response 
 ### Task 5: When did the attacker first interact with the API on the controller node?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Filter:** `http.request && !(http.request.uri contains "keepalive") && !(http.request.uri contains "dashboard")`
+**Filter:** `http.request && http.user_agent contains "openstacksdk"`
 
-Before 09:40:29, all API calls on the controller were triggered by the Horizon dashboard session (browsing the UI generates backend API calls automatically). After a 75-second gap (the attacker reading and sourcing the OpenRC file), the first standalone API call appears - a `GET /identity` which is the OpenStack CLI's initial service discovery request.
+Before 09:40:29, controller API traffic is mostly dashboard-generated background activity. After a
+75-second gap (the attacker reading and sourcing the OpenRC file), the first request with the
+OpenStack SDK User-Agent appears - `GET /identity` at **09:41:44 UTC** - which is the SDK's service
+discovery call, always the first thing the CLI does when you run any `openstack` command.
 
 > **Answer:** `2025-07-01 09:41:44`
 
@@ -380,13 +539,14 @@ Before 09:40:29, all API calls on the controller were triggered by the Horizon d
 ### Task 6: What is the project ID of the default project accessed by the attacker?
 
 **PCAP:** Both - appears in `web-server` (OpenRC file) and throughout `controller` (API URLs)  
-**Easiest source:** Follow TCP Stream on the OpenRC download (Task 4)
+**Easiest source:** Export the OpenRC file via File > Export Objects > HTTP (Task 4)
 
 ```bash
 export OS_PROJECT_ID=9fb84977ff7c4a0baf0d5dbb57e235c7
 ```
 
-It also appears embedded in dozens of API URLs throughout the controller PCAP: compute usage queries, Swift storage paths (`/v1/AUTH_9fb84977...`), and networking quota requests.
+It also appears embedded in dozens of API URLs throughout the controller PCAP: compute usage
+queries, Swift storage paths (`/v1/AUTH_9fb84977...`), and networking quota requests.
 
 > **Answer:** `9fb84977ff7c4a0baf0d5dbb57e235c7`
 
@@ -395,9 +555,18 @@ It also appears embedded in dozens of API URLs throughout the controller PCAP: c
 ### Task 7: Which OpenStack service provides authentication and authorization?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Filter:** `http.request.uri == "/identity/v3/services"`
+**Filter:** `http.request.uri == "/identity/v3/services" && http.user_agent contains "openstacksdk"`
 
-Following the TCP stream reveals the full service catalog JSON. The service with type `identity` is **Keystone** - OpenStack's authentication and authorization service. Every API call hitting the `/identity/` path in the controller PCAP is talking to Keystone.
+Click the matching packet and follow the TCP stream (`Follow > TCP Stream`). The response body is a
+JSON service catalog. The entry with `"type": "identity"` is **Keystone** - OpenStack's
+authentication and authorization service. Every API call hitting the `/identity/` path in the
+controller PCAP is talking to Keystone.
+
+The relevant JSON entry:
+
+```json
+{"name": "keystone", "type": "identity", "enabled": true, ...}
+```
 
 > **Answer:** `Keystone`
 
@@ -406,15 +575,18 @@ Following the TCP stream reveals the full service catalog JSON. The service with
 ### Task 8: What is the endpoint URL of the Swift service?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Filter:** `http.request.uri == "/identity/v3/endpoints"`
+**Filter:** `http.request.uri == "/identity/v3/endpoints" && http.user_agent contains "openstacksdk"`
 
-The endpoint catalog JSON response lists all service endpoints. The Swift public endpoint is registered as a template:
+Follow the TCP stream on the matching packet. The response body is a JSON endpoint catalog listing
+all service endpoints. Find the entries with `service_id` matching the Swift service
+(`f9194820052d4788b09157bf0a0dfdd0`). The public-interface endpoint URL is a template:
 
-```text
+```
 http://134.209.71.220:8080/v1/AUTH_$(project_id)s
 ```
 
-When the `$(project_id)s` template variable is resolved with the admin project ID from the OpenRC file, the full URL becomes:
+When the `$(project_id)s` template variable is resolved using the admin project ID from the OpenRC
+file, the full URL becomes:
 
 > **Answer:** `http://134.209.71.220:8080/v1/AUTH_9fb84977ff7c4a0baf0d5dbb57e235c7`
 
@@ -423,13 +595,21 @@ When the `$(project_id)s` template variable is resolved with the admin project I
 ### Task 9: How many containers were discovered by the attacker?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Filter:** `http.request.uri == "/v1/AUTH_9fb84977ff7c4a0baf0d5dbb57e235c7?format=json"`
+**Filter:** `http.request.uri contains "AUTH_9fb84977ff7c4a0baf0d5dbb57e235c7?format=json" && ip.src == 117.200.21.26`
 
-Following the TCP stream shows the Swift account listing response. The header `X-Account-Container-Count: 3` confirms the count, and the JSON body lists all three:
+One packet matches: the attacker's GET to the Swift proxy at port 8080 listing all containers.
+Follow the TCP stream. The response includes:
 
-1. `dev-files`
-2. `employee-data`
-3. `user-data`
+- `X-Account-Container-Count: 3` in the headers (confirms the count)
+- A JSON body listing all three containers:
+
+```json
+[
+  { "name": "dev-files", "count": 0, "bytes": 0 },
+  { "name": "employee-data", "count": 0, "bytes": 0 },
+  { "name": "user-data", "count": 0, "bytes": 0 }
+]
+```
 
 > **Answer:** `3`
 
@@ -438,9 +618,11 @@ Following the TCP stream shows the Swift account listing response. The header `X
 ### Task 10: When did the attacker download the sensitive user data file?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Filter:** `http.request.uri contains "user-details.csv"`
+**Filter:** `http.request.uri contains "user-details.csv" && ip.src == 117.200.21.26`
 
-Two packets match: the external request to Swift proxy (port 8080) and the internal proxy-to-object-server forwarding on `/sdb1/`. The timestamp of the first - the attacker's actual request - is the answer.
+One packet matches: the attacker's GET to the Swift proxy at port 8080. (You may also see an
+internal forwarding request from the Swift proxy to the object storage server on a path beginning
+with `/sdb1/` - filter by `ip.src == 117.200.21.26` to see only the original request.)
 
 > **Answer:** `2025-07-01 09:45:23`
 
@@ -449,9 +631,21 @@ Two packets match: the external request to Swift proxy (port 8080) and the inter
 ### Task 11: How many user records are in the sensitive user data file?
 
 **PCAP:** `controller_2025-07-01.pcap`  
-**Method:** Follow TCP Stream on the `user-details.csv` download
+**Method:** Follow the TCP stream on the `user-details.csv` GET packet from Task 10.
 
-The response header shows `Content-Type: text/csv` and `Content-Length: 1367`. The file contains a header row (`Full Name,Email,Phone Number`) followed by 28 data records (John Doe through Zoe Lee), each with full name, email address, and phone number - personally identifiable information.
+The response headers confirm:
+
+```
+Content-Type: text/csv
+Content-Length: 1367
+```
+
+The response body is the file itself - readable plaintext (Swift object storage does not compress
+responses). The file contains:
+
+- A header row: `Full Name,Email,Phone Number`
+- 28 data records (John Doe through Zoe Lee), each containing full name, email address, and phone
+  number - personally identifiable information.
 
 > **Answer:** `28`
 
@@ -462,7 +656,7 @@ The response header shows `Content-Type: text/csv` and `Content-Length: 1367`. T
 **PCAP:** `controller_2025-07-01.pcap`  
 **Filter:** `http.request.method == POST && http.request.uri == "/identity/v3/users"`
 
-Following the TCP stream reveals the JSON request body:
+Follow the TCP stream. The request body is a JSON payload sent to Keystone:
 
 ```json
 {
@@ -475,7 +669,8 @@ Following the TCP stream reveals the JSON request body:
 }
 ```
 
-The server responded with `HTTP 201 CREATED`, confirming the account was successfully created. A subsequent PUT request granted this user the admin role on the project.
+The server responded with `HTTP 201 CREATED`, confirming the account was successfully created. A
+subsequent `PUT` request at 09:49:15 then granted this user the admin role on the project.
 
 > **Answer:** `jellibean`
 
@@ -492,13 +687,16 @@ The server responded with `HTTP 201 CREATED`, confirming the account was success
 
 ### Task 14: What is the MITRE ATT&CK technique ID for the persistence method?
 
-The attacker created a new user account in a cloud platform (OpenStack Keystone) and granted it administrative privileges. This maps to:
+The attacker created a new user account in a cloud platform (OpenStack Keystone) and granted it
+administrative privileges. This maps to:
 
 - **Tactic:** Persistence
 - **Technique:** T1136 - Create Account
 - **Sub-technique:** .003 - Cloud Account
 
-T1136.003 specifically covers adversaries creating accounts in cloud environments (AWS IAM, Azure AD, GCP, OpenStack Keystone) to maintain persistent access, distinguishing it from local account creation (.001) or domain account creation (.002).
+T1136.003 specifically covers adversaries creating accounts in cloud environments (AWS IAM, Azure AD,
+GCP IAM, OpenStack Keystone) to maintain persistent access, distinguishing it from local account
+creation (.001) or domain account creation (.002).
 
 > **Answer:** `T1136.003`
 
@@ -506,46 +704,47 @@ T1136.003 specifically covers adversaries creating accounts in cloud environment
 
 ## Key Wireshark Filters Reference
 
-| Purpose                    | PCAP       | Display Filter                                                                 |
-| -------------------------- | ---------- | ------------------------------------------------------------------------------ |
-| All HTTP requests          | Either     | `http.request`                                                                 |
-| Attacker's fuzzing traffic | web-server | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Fuzz"`   |
-| Attacker's browser traffic | web-server | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Chrome"` |
-| Login attempts             | web-server | `http.request.method == POST && http.request.uri contains "login"`             |
-| OpenRC download            | web-server | `http.request.uri contains "openrc"`                                           |
-| Keystone API calls         | controller | `http.request.uri contains "/identity/v3"`                                     |
-| Swift storage requests     | controller | `http.request.uri contains "AUTH_"`                                            |
-| CSV downloads              | controller | `http.request.uri contains ".csv"`                                             |
-| User creation              | controller | `http.request.method == POST && http.request.uri == "/identity/v3/users"`      |
-| Exclude background noise   | controller | `!(http.request.uri contains "keepalive")`                                     |
+| Purpose                         | PCAP       | Display Filter                                                                                |
+| ------------------------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| All attacker HTTP requests      | web-server | `http.request && ip.src == 117.200.21.26`                                                     |
+| Attacker fuzzing traffic only   | web-server | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Fuzz"`                  |
+| Attacker browser traffic only   | web-server | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Chrome"`                |
+| Login attempts (attacker only)  | web-server | `http.request.method == POST && http.request.uri contains "login" && ip.src == 117.200.21.26` |
+| OpenRC download (attacker only) | web-server | `http.request.uri contains "openrc" && ip.src == 117.200.21.26`                               |
+| Direct OpenStack CLI calls      | controller | `http.request && http.user_agent contains "openstacksdk"`                                     |
+| Keystone API calls              | controller | `http.request.uri contains "/identity/v3"`                                                    |
+| Swift account listing           | controller | `http.request.uri contains "AUTH_" && http.request.uri contains "format=json"`                |
+| CSV downloads (attacker)        | controller | `http.request.uri contains ".csv" && ip.src == 117.200.21.26`                                 |
+| User creation                   | controller | `http.request.method == POST && http.request.uri == "/identity/v3/users"`                     |
+| Role assignment                 | controller | `http.request.method == PUT && http.request.uri contains "roles"`                             |
 
 ---
 
 ## Tools Identified
 
-| Tool          | Version   | User-Agent String                                                               | Purpose                               |
-| ------------- | --------- | ------------------------------------------------------------------------------- | ------------------------------------- |
-| ffuf          | 2.1.0-dev | `Fuzz Faster U Fool v2.1.0-dev`                                                 | Subdomain enumeration                 |
-| Chrome        | 137.0.0.0 | `Mozilla/5.0 ... Chrome/137.0.0.0`                                              | Manual dashboard exploitation         |
-| OpenStack SDK | 4.6.0     | `openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5` | API enumeration and data exfiltration |
+| Tool          | Version   | User-Agent String                                                                                      | Purpose                               |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| ffuf          | 2.1.0-dev | `Fuzz Faster U Fool v2.1.0-dev`                                                                        | Subdomain enumeration                 |
+| Chrome        | 137.0.0.0 | `Mozilla/5.0 (Macintosh Intel Mac OS X 10_15_7) AppleWebKit/537.36 ... Chrome/137.0.0.0 Safari/537.36` | Manual dashboard exploitation         |
+| OpenStack SDK | 4.6.0     | `openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5`                        | API enumeration and data exfiltration |
 
 ---
 
 ## Network Topology
 
-```text
-Attacker (117.200.21.26)
+```
+Attacker (117.200.21.26) - macOS, Chrome 137, ffuf 2.1.0-dev
     |
-    v
+    v  HTTP :80
 Web Server / Reverse Proxy (157.230.81.229 / 10.116.0.3)
     |
-    v
+    v  HTTP :80 (internal forwarding)
 OpenStack Controller (134.209.71.220 / 10.116.0.4)
-    |- Keystone (Identity)    - port 80 /identity
-    |- Nova (Compute)         - port 80 /compute
-    |- Neutron (Networking)   - port 80 /networking
-    |- Glance (Images)        - port 80 /image
-    |- Cinder (Block Storage) - port 80 /volume
+    |- Keystone (Identity)    - port 80  /identity
+    |- Nova (Compute)         - port 80  /compute
+    |- Neutron (Networking)   - port 80  /networking
+    |- Glance (Images)        - port 80  /image
+    |- Cinder (Block Storage) - port 80  /volume
     |- Swift (Object Storage) - port 8080
     |- MySQL                  - port 3306 (localhost)
     |- RabbitMQ (AMQP)        - port 5672 (localhost)
@@ -557,12 +756,27 @@ OpenStack Controller (134.209.71.220 / 10.116.0.4)
 
 ## MITRE ATT&CK Mapping
 
-![Vantage MITRE ATT&CK mapping](/images/sherlocks/vantage/mitre-mapping.svg)
-
 | Phase          | Technique                                      | Evidence                                                        |
 | -------------- | ---------------------------------------------- | --------------------------------------------------------------- |
 | Reconnaissance | T1595.003 - Active Scanning: Wordlist Scanning | ffuf subdomain enumeration (3,579 subdomains)                   |
 | Initial Access | T1078.004 - Valid Accounts: Cloud Accounts     | Brute-forced admin:StrongAdminSecret on Horizon                 |
-| Discovery      | T1580 - Cloud Infrastructure Discovery         | Enumerated services, endpoints, users, containers               |
+| Discovery      | T1580 - Cloud Infrastructure Discovery         | Enumerated services, endpoints, users, VMs, containers          |
 | Collection     | T1530 - Data from Cloud Storage                | Downloaded user-details.csv and employee-details.csv from Swift |
 | Persistence    | T1136.003 - Create Account: Cloud Account      | Created "jellibean" with admin role                             |
+
+---
+
+## Corrections from Previous Version
+
+The following errors were identified by verifying each claim against the raw PCAP data and have been
+corrected in this version:
+
+| Section             | Previous (incorrect)                                                                                                | Corrected                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Step 1              | No explanation for why "8 form submissions" when there are only 4 login attempts                                    | Added explanation: the reverse proxy doubles every POST - both the external and internal hops are captured                     |
+| Step 5 login filter | `http.request.method == POST && http.request.uri contains "/dashboard/auth/login"` then "Four POST requests appear" | Added `&& ip.src == 117.200.21.26`, without it the filter returns 8 packets and selecting the wrong one gives the wrong stream |
+| Step 5 POST body    | Showed simplified `username=admin&password=admin&region=default`                                                    | Shows the real body: includes `csrfmiddlewaretoken`, `fake_email`, and `fake_password` fields                                  |
+| Step 5 OpenRC       | Implied the file is readable in the Follow TCP Stream window                                                        | Corrected: response is gzip-compressed (binary in stream), use **File > Export Objects > HTTP** instead                        |
+| Step 4 User-Agent   | Showed partial UA string `Chrome/137.0.0.0`                                                                         | Shows full UA string including macOS platform: `Mozilla/5.0 (Macintosh Intel Mac OS X 10_15_7) ...`                            |
+| Attack Timeline     | `09:44:27` - "Lists contents of user-data and employee-data containers" (single entry)                              | Split into two correct entries: `09:43:47` (user-data) and `09:44:05` (employee-data)                                          |
+| Attack Timeline     | `09:48:28` - "Grants jellibean admin role on the project"                                                           | Corrected to `09:49:15` - actual timestamp verified in the PCAP                                                                |

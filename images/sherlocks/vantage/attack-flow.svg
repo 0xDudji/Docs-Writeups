@@ -9,8 +9,8 @@
       .title { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; }
       .sub { font: 500 18px 'Segoe UI', Arial, sans-serif; fill: #9fb3c8; }
       .cardTitle { font: 700 18px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; }
-      .cardText { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #d8e2ec; }
-      .mono { font: 600 13px 'Consolas', 'Courier New', monospace; fill: #d8e2ec; }
+      .cardText { font: 500 12px 'Segoe UI', Arial, sans-serif; fill: #d8e2ec; }
+      .mono { font: 600 12px 'Consolas', 'Courier New', monospace; fill: #d8e2ec; }
       .noteT { font: 600 15px 'Segoe UI', Arial, sans-serif; fill: #12263a; }
       .noteS { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #17334b; }
     </style>
@@ -24,50 +24,66 @@
   <rect x="34" y="100" width="1332" height="30" fill="#2b313c"/>
   <text x="48" y="120" style="font:500 14px 'Segoe UI'; fill:#d8e2ec;">Incident Flow Board</text>
 
-  <rect x="60" y="165" width="260" height="140" rx="8" fill="#243041" stroke="#4b5563"/>
+  <rect x="60" y="165" width="260" height="160" rx="8" fill="#243041" stroke="#4b5563"/>
   <text x="76" y="190" class="cardTitle">1. Recon</text>
-  <text x="76" y="214" class="cardText">Subdomain fuzzing against web server.</text>
-  <text x="76" y="236" class="cardText">About 3,579 candidate hosts requested.</text>
-  <text x="76" y="262" class="mono">UA: Fuzz Faster U Fool v2.1.0-dev</text>
+  <text x="76" y="214" class="cardText">Subdomain fuzzing against</text>
+  <text x="76" y="232" class="cardText">the web server.</text>
+  <text x="76" y="252" class="cardText">Around 3,579 candidate hosts</text>
+  <text x="76" y="270" class="cardText">were requested.</text>
+  <text x="76" y="288" class="mono">UA: ffuf v2.1.0-dev</text>
 
-  <rect x="380" y="165" width="260" height="140" rx="8" fill="#2a3648" stroke="#4b5563"/>
+  <rect x="380" y="165" width="260" height="160" rx="8" fill="#2a3648" stroke="#4b5563"/>
   <text x="396" y="190" class="cardTitle">2. Initial access</text>
-  <text x="396" y="214" class="cardText">Login attempts on Horizon dashboard.</text>
-  <text x="396" y="236" class="cardText">First successful auth returns HTTP 302.</text>
-  <text x="396" y="262" class="mono">admin : StrongAdminSecret</text>
+  <text x="396" y="214" class="cardText">Login attempts on the</text>
+  <text x="396" y="232" class="cardText">Horizon dashboard.</text>
+  <text x="396" y="252" class="cardText">First successful auth</text>
+  <text x="396" y="270" class="cardText">returns HTTP 302.</text>
+  <text x="396" y="288" class="mono">admin : StrongAdminSecret</text>
 
-  <rect x="700" y="165" width="260" height="140" rx="8" fill="#2a3648" stroke="#4b5563"/>
+  <rect x="700" y="165" width="260" height="160" rx="8" fill="#2a3648" stroke="#4b5563"/>
   <text x="716" y="190" class="cardTitle">3. Credential pivot</text>
-  <text x="716" y="214" class="cardText">OpenRC script downloaded from API access.</text>
-  <text x="716" y="236" class="cardText">Provides auth URL and project context.</text>
-  <text x="716" y="262" class="mono">admin-openrc.sh at 09:40:29</text>
+  <text x="716" y="214" class="cardText">OpenRC script downloaded from</text>
+  <text x="716" y="232" class="cardText">dashboard API access page.</text>
+  <text x="716" y="252" class="cardText">Provides auth URL and</text>
+  <text x="716" y="270" class="cardText">project context.</text>
+  <text x="716" y="288" class="mono">admin-openrc.sh at 09:40:29</text>
 
-  <rect x="1020" y="165" width="300" height="140" rx="8" fill="#2a3648" stroke="#4b5563"/>
+  <rect x="1010" y="165" width="320" height="160" rx="8" fill="#2a3648" stroke="#4b5563"/>
   <text x="1036" y="190" class="cardTitle">4. API discovery on controller</text>
-  <text x="1036" y="214" class="cardText">Direct calls begin after short setup delay.</text>
-  <text x="1036" y="236" class="cardText">Services, users, endpoints are enumerated.</text>
-  <text x="1036" y="262" class="mono">openstacksdk / keystoneauth1 UA</text>
+  <text x="1036" y="214" class="cardText">Direct API calls begin after</text>
+  <text x="1036" y="232" class="cardText">a short setup delay.</text>
+  <text x="1036" y="252" class="cardText">Services, users, and endpoints</text>
+  <text x="1036" y="270" class="cardText">are enumerated.</text>
+  <text x="1036" y="288" class="mono">openstacksdk /</text>
+  <text x="1036" y="306" class="mono">keystoneauth1 UA</text>
 
   <rect x="250" y="420" width="360" height="170" rx="8" fill="#2a3648" stroke="#4b5563"/>
   <text x="266" y="446" class="cardTitle">5. Collection from Swift</text>
-  <text x="266" y="470" class="cardText">Containers discovered and listed.</text>
-  <text x="266" y="492" class="cardText">Sensitive CSV files are downloaded.</text>
-  <text x="266" y="518" class="mono">user-details.csv and employee-details.csv</text>
+  <text x="266" y="470" class="cardText">Containers are discovered</text>
+  <text x="266" y="488" class="cardText">and listed.</text>
+  <text x="266" y="508" class="cardText">Sensitive CSV files are</text>
+  <text x="266" y="526" class="cardText">downloaded.</text>
+  <text x="266" y="548" class="mono">user-details.csv</text>
+  <text x="266" y="568" class="mono">employee-details.csv</text>
 
   <rect x="700" y="420" width="430" height="170" rx="8" fill="#2a3648" stroke="#4b5563"/>
   <text x="716" y="446" class="cardTitle">6. Persistence</text>
-  <text x="716" y="470" class="cardText">New cloud user is created and elevated.</text>
-  <text x="716" y="492" class="cardText">Admin role assignment establishes long-term access.</text>
-  <text x="716" y="518" class="mono">user: jellibean   technique: T1136.003</text>
+  <text x="716" y="470" class="cardText">A new cloud user is created</text>
+  <text x="716" y="488" class="cardText">and elevated.</text>
+  <text x="716" y="508" class="cardText">Admin role assignment</text>
+  <text x="716" y="526" class="cardText">establishes persistence.</text>
+  <text x="716" y="548" class="mono">user: jellibean</text>
+  <text x="716" y="568" class="mono">technique: T1136.003</text>
 
-  <line x1="320" y1="235" x2="380" y2="235" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
-  <line x1="640" y1="235" x2="700" y2="235" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
-  <line x1="960" y1="235" x2="1020" y2="235" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
-  <line x1="1130" y1="305" x2="880" y2="420" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
-  <line x1="900" y1="305" x2="430" y2="420" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="320" y1="245" x2="380" y2="245" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="640" y1="245" x2="700" y2="245" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="960" y1="245" x2="1010" y2="245" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1130" y1="325" x2="880" y2="420" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="900" y1="325" x2="430" y2="420" stroke="#58d0ff" stroke-width="3" marker-end="url(#arrow)"/>
 
   <rect x="60" y="625" width="1260" height="135" rx="8" fill="#d3f4ff"/>
   <text x="78" y="652" class="noteT">How to use this diagram while reading the writeup</text>
-  <text x="78" y="676" class="noteS">Follow each box in order and verify with packet evidence: filter output, User-Agent values, response codes, OpenRC content, object-store requests, and user creation API calls.</text>
-  <text x="78" y="700" class="noteS">This keeps the narrative grounded in observable network events rather than assumptions.</text>
+  <text x="78" y="676" class="noteS">Follow each box in order and verify packet evidence: filters, response codes, OpenRC content,</text>
+  <text x="78" y="698" class="noteS">object-store requests, and user-creation API calls.</text>
+  <text x="78" y="720" class="noteS">This keeps the narrative grounded in observed events.</text>
 </svg>
