@@ -1,0 +1,347 @@
+---
+title: "Vantage"
+description: "HTB Sherlock Vantage forensic investigation writeup (DFIR / Network Forensics)."
+---
+
+# HTB Sherlock: Vantage - Full Writeup
+
+## Challenge Description
+
+> A small company moved some of its resources to a private cloud installation. The developers left the redirect to the dashboard on their web server. The security team got an email from the alleged attacker stating that the user data was leaked. It is up to you to investigate the situation.
+
+**Difficulty:** Very Easy  
+**Category:** DFIR / Network Forensics  
+**Evidence Files:** `web-server_2025-07-01.pcap` (15 MB), `controller_2025-07-01.pcap` (6.9 MB)
+
+![Vantage attack flow diagram](/images/sherlocks/vantage/attack-flow.svg)
+
+---
+
+## Initial Analysis Methodology
+
+Before looking at any questions, the goal is to understand what happened. Here's the systematic approach to analyzing unknown PCAP files in Wireshark.
+
+### Step 1 - Protocol Hierarchy
+
+**Wireshark:** `Statistics -> Protocol Hierarchy`
+
+![Wireshark protocol hierarchy walkthrough](/images/sherlocks/vantage/wireshark-step-1-protocol-hierarchy.svg)
+
+This tells you what kind of machine each capture came from.
+
+| PCAP       | Key Protocols                                                                           | Interpretation                              |
+| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------------- |
+| web-server | HTTP (7,482 frames), 8 urlencoded-form submissions                                      | Web server; the 8 form POSTs are suspicious |
+| controller | HTTP + JSON, MySQL (8,978 frames), AMQP (849), etcd (port 2379), memcached (port 11211) | OpenStack controller node                   |
+
+### Step 2 - TCP Conversations
+
+**Wireshark:** `Statistics -> Conversations -> TCP tab` -> sort by Packets
+
+![Wireshark TCP conversations walkthrough](/images/sherlocks/vantage/wireshark-step-2-conversations.svg)
+
+In the web-server PCAP, one IP immediately stands out: `117.200.21.26` generated ~20,000 packets across ~240 parallel TCP connections to port 80. That volume from a single source is not normal browsing - it's automated scanning.
+
+A smaller set of ~250 packets from `10.116.0.3` (an internal IP) also targets port 80 - this turns out to be the reverse proxy forwarding the attacker's traffic to the backend.
+
+### Step 3 - Filter HTTP Requests
+
+**Wireshark display filter:** `http.request && ip.src == 117.200.21.26`
+
+![Wireshark HTTP filter walkthrough](/images/sherlocks/vantage/wireshark-step-3-filter-http.svg)
+
+Scrolling through the results reveals the attack pattern: thousands of GET requests to different subdomains (`1.vantage.tech`, `a.vantage.tech`, `abc.vantage.tech`...), followed by manual browsing of a specific subdomain.
+
+### Step 4 - Check User-Agents
+
+![Wireshark user-agent inspection walkthrough](/images/sherlocks/vantage/wireshark-step-4-user-agent.svg)
+
+Click any packet from the fuzzing phase, expand `Hypertext Transfer Protocol -> User-Agent`:
+
+- **Fuzzing phase:** `Fuzz Faster U Fool v2.1.0-dev` (ffuf)
+- **Manual phase:** `Chrome/137.0.0.0` (browser)
+
+The switch from ffuf to Chrome marks the moment the attacker found a valid subdomain and pivoted to manual exploitation.
+
+### Step 5 - Follow TCP Streams
+
+**Wireshark:** Right-click any suspicious packet -> `Follow -> TCP Stream`
+
+![Wireshark follow TCP stream walkthrough](/images/sherlocks/vantage/wireshark-step-5-follow-stream.svg)
+
+This reconstructs the full HTTP conversation (request + response) in a readable format. Following the login POST streams reveals credentials in cleartext.
+
+### Step 6 - Cross-Reference PCAPs via Timestamps
+
+![Wireshark timestamp correlation walkthrough](/images/sherlocks/vantage/wireshark-step-6-time-correlation.svg)
+
+The web-server capture shows the attacker's external activity (fuzzing, dashboard login, OpenRC download). The controller capture shows the internal API activity that followed. The timestamps align perfectly - OpenRC downloaded at 09:40:29, first API call at 09:41:44 - a 75-second gap while the attacker configured their CLI.
+
+---
+
+## Attack Timeline
+
+![Vantage incident timeline](/images/sherlocks/vantage/timeline.svg)
+
+| Time (UTC)  | Source PCAP | Event                                                                 |
+| ----------- | ----------- | --------------------------------------------------------------------- |
+| 09:38-09:40 | web-server  | Subdomain fuzzing with ffuf (3,579 subdomains tested)                 |
+| 09:39:07    | web-server  | Attacker discovers `cloud.vantage.tech`, switches to Chrome           |
+| 09:39:16    | web-server  | Login attempt: admin / admin -> failed (HTTP 200)                     |
+| 09:39:27    | web-server  | Login attempt: demo / demo -> failed (HTTP 200)                       |
+| 09:39:33    | web-server  | Login attempt: root / root -> failed (HTTP 200)                       |
+| 09:40:07    | web-server  | Login attempt: admin / StrongAdminSecret -> success (HTTP 302)        |
+| 09:40:29    | web-server  | Downloads admin-openrc.sh from API Access page                        |
+| 09:41:44    | controller  | First direct API call - OpenStack CLI service discovery               |
+| 09:41:45    | controller  | Enumerates services and endpoints via Keystone                        |
+| 09:42:02    | controller  | Lists all users via Keystone                                          |
+| 09:43:27    | controller  | Lists Swift containers (finds 3: dev-files, employee-data, user-data) |
+| 09:44:27    | controller  | Lists contents of user-data and employee-data containers              |
+| 09:45:23    | controller  | Downloads user-details.csv (28 PII records)                           |
+| 09:45:47    | controller  | Downloads employee-details.csv                                        |
+| 09:48:02    | controller  | Creates backdoor user "jellibean" with password "P@$$word"            |
+| 09:48:28    | controller  | Grants jellibean admin role on the project                            |
+
+---
+
+## Questions & Answers
+
+### Task 1: What tool did the attacker use to fuzz the web server?
+
+**Filter:** `http.request && ip.src == 117.200.21.26`  
+**Where to look:** Click any packet -> expand `Hypertext Transfer Protocol -> User-Agent`
+
+The User-Agent field reads `Fuzz Faster U Fool v2.1.0-dev` - this is ffuf, a popular web fuzzing tool written in Go.
+
+> **Answer:** `ffuf@2.1.0-dev`
+
+---
+
+### Task 2: Which subdomain did the attacker discover?
+
+**Filter:** `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Chrome"`
+
+After the ffuf scan, the attacker switched to Chrome and manually browsed to the discovered subdomain. Every Chrome request targets the same Host header.
+
+> **Answer:** `cloud.vantage.tech`
+
+---
+
+### Task 3: How many login attempts did the attacker make before successfully logging in?
+
+**Filter:** `http.request.method == POST && http.request.uri contains "/dashboard/auth/login"`
+
+Four POST requests appear. The response codes distinguish success from failure: HTTP 200 means the login page was re-rendered (failed), while HTTP 302 redirect means authentication succeeded. The first three returned 200, the fourth returned 302.
+
+| Attempt      | Credentials               | Response  | Result  |
+| ------------ | ------------------------- | --------- | ------- |
+| 1 (09:39:16) | admin : admin             | 200 OK    | Failed  |
+| 2 (09:39:27) | demo : demo               | 200 OK    | Failed  |
+| 3 (09:39:33) | root : root               | 200 OK    | Failed  |
+| 4 (09:40:07) | admin : StrongAdminSecret | 302 Found | Success |
+
+> **Answer:** `3`
+
+---
+
+### Task 4: When did the attacker download the OpenStack API remote access config file?
+
+**Filter:** `http.request.uri contains "openrc"`
+
+The OpenRC file is a shell script that sets environment variables for OpenStack CLI authentication. The attacker downloaded it from `Project -> API Access -> Download OpenStack RC File` in the Horizon dashboard.
+
+Following the TCP stream shows the response with `Content-Disposition: attachment; filename="admin-openrc.sh"`, containing the auth URL, project ID, and username.
+
+> **Answer:** `2025-07-01 09:40:29`
+
+---
+
+### Task 5: When did the attacker first interact with the API on the controller node?
+
+**Filter (in controller.pcap):** `http.request && !(http.request.uri contains "keepalive") && !(http.request.uri contains "dashboard")`
+
+Before 09:40:29, all API calls on the controller were triggered by the Horizon dashboard session (browsing the UI generates backend API calls). After a 75-second gap (the attacker reading and sourcing the OpenRC file), the first standalone API call appears - a GET to `/identity` which is the OpenStack CLI's initial service discovery request.
+
+> **Answer:** `2025-07-01 09:41:44`
+
+---
+
+### Task 6: What is the project ID of the default project accessed by the attacker?
+
+The project ID appears in multiple locations. The easiest source is the OpenRC file itself (Follow TCP Stream on the openrc GET request):
+
+```bash
+export OS_PROJECT_ID=9fb84977ff7c4a0baf0d5dbb57e235c7
+```
+
+It also appears embedded in dozens of API URLs throughout the controller PCAP (compute usage queries, Swift storage paths, networking quota requests).
+
+> **Answer:** `9fb84977ff7c4a0baf0d5dbb57e235c7`
+
+---
+
+### Task 7: Which OpenStack service provides authentication and authorization?
+
+**Filter:** `http.request.uri == "/identity/v3/services"`
+
+Following the TCP stream reveals the full service catalog. The service with type "identity" is Keystone - OpenStack's authentication and authorization service. Every API call hitting the `/identity/` path in the controller PCAP is talking to Keystone.
+
+> **Answer:** `Keystone`
+
+---
+
+### Task 8: What is the endpoint URL of the Swift service?
+
+**Filter:** `http.request.uri == "/identity/v3/endpoints"`
+
+The endpoint catalog JSON response lists all service endpoints. The Swift public endpoint is registered as:
+
+```text
+http://134.209.71.220:8080/v1/AUTH_$(project_id)s
+```
+
+When the `$(project_id)s` template variable is resolved with the admin project ID, the full URL becomes:
+
+> **Answer:** `http://134.209.71.220:8080/v1/AUTH_9fb84977ff7c4a0baf0d5dbb57e235c7`
+
+---
+
+### Task 9: How many containers were discovered by the attacker?
+
+**Filter:** `http.request.uri == "/v1/AUTH_9fb84977ff7c4a0baf0d5dbb57e235c7?format=json"`
+
+Following the TCP stream shows the Swift account listing response. The header `X-Account-Container-Count: 3` confirms the count, and the JSON body lists all three:
+
+1. `dev-files`
+2. `employee-data`
+3. `user-data`
+
+> **Answer:** `3`
+
+---
+
+### Task 10: When did the attacker download the sensitive user data file?
+
+**Filter:** `http.request.uri contains "user-details.csv"`
+
+Two packets match: the external request to Swift proxy (port 8080) and the internal proxy-to-object-server forwarding. The timestamp of the first (the attacker's actual request) is the answer.
+
+> **Answer:** `2025-07-01 09:45:23`
+
+---
+
+### Task 11: How many user records are in the sensitive user data file?
+
+Following the TCP stream for the `user-details.csv` download reveals the full CSV content. The response header shows `Content-Type: text/csv` and `Content-Length: 1367`.
+
+The file contains a header row (`Full Name,Email,Phone Number`) followed by 28 data records (John Doe through Zoe Lee), each with full name, email address, and phone number - personally identifiable information.
+
+> **Answer:** `28`
+
+---
+
+### Task 12: What is the username of the new user created for persistence?
+
+**Filter:** `http.request.method == POST && http.request.uri == "/identity/v3/users"`
+
+Following the TCP stream reveals the JSON request body:
+
+```json
+{
+  "user": {
+    "name": "jellibean",
+    "password": "P@$$word",
+    "enabled": true,
+    "default_project_id": "9fb84977ff7c4a0baf0d5dbb57e235c7"
+  }
+}
+```
+
+The server responded with `HTTP 201 CREATED`, confirming the account was successfully created. A subsequent PUT request granted this user the admin role.
+
+> **Answer:** `jellibean`
+
+---
+
+### Task 13: What is the password of the new user?
+
+Same TCP stream as Task 12 - the password is in the JSON request body in cleartext.
+
+> **Answer:** `P@$$word`
+
+---
+
+### Task 14: What is the MITRE ATT&CK technique ID for the persistence method?
+
+The attacker created a new user account in a cloud platform (OpenStack Keystone) and granted it administrative privileges. This maps to:
+
+- **Tactic:** Persistence
+- **Technique:** T1136 - Create Account
+- **Sub-technique:** .003 - Cloud Account
+
+T1136.003 specifically covers adversaries creating accounts in cloud environments (AWS IAM, Azure AD, GCP, OpenStack Keystone) to maintain persistent access, distinguishing it from local account creation (.001) or domain account creation (.002).
+
+> **Answer:** `T1136.003`
+
+---
+
+## Key Wireshark Filters Reference
+
+| Purpose                    | Display Filter                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| All HTTP requests          | `http.request`                                                                 |
+| Attacker's fuzzing traffic | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Fuzz"`   |
+| Attacker's browser traffic | `http.request && ip.src == 117.200.21.26 && http.user_agent contains "Chrome"` |
+| Login attempts             | `http.request.method == POST && http.request.uri contains "login"`             |
+| OpenRC download            | `http.request.uri contains "openrc"`                                           |
+| Keystone API calls         | `http.request.uri contains "/identity/v3"`                                     |
+| Swift storage requests     | `http.request.uri contains "AUTH_"`                                            |
+| CSV downloads              | `http.request.uri contains ".csv"`                                             |
+| User creation              | `http.request.method == POST && http.request.uri == "/identity/v3/users"`      |
+| Exclude background noise   | `!(http.request.uri contains "keepalive")`                                     |
+
+---
+
+## Tools Identified
+
+| Tool          | Version   | User-Agent String                                                               | Purpose                               |
+| ------------- | --------- | ------------------------------------------------------------------------------- | ------------------------------------- |
+| ffuf          | 2.1.0-dev | `Fuzz Faster U Fool v2.1.0-dev`                                                 | Subdomain enumeration                 |
+| Chrome        | 137.0.0.0 | `Mozilla/5.0 ... Chrome/137.0.0.0`                                              | Manual dashboard exploitation         |
+| OpenStack SDK | 4.6.0     | `openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5` | API enumeration and data exfiltration |
+
+---
+
+## Network Topology
+
+```text
+Attacker (117.200.21.26)
+    |
+    v
+Web Server / Reverse Proxy (157.230.81.229 / 10.116.0.3)
+    |
+    v
+OpenStack Controller (134.209.71.220 / 10.116.0.4)
+    |- Keystone (Identity)    - port 80 /identity
+    |- Nova (Compute)         - port 80 /compute
+    |- Neutron (Networking)   - port 80 /networking
+    |- Glance (Images)        - port 80 /image
+    |- Cinder (Block Storage) - port 80 /volume
+    |- Swift (Object Storage) - port 8080
+    |- MySQL                  - port 3306 (localhost)
+    |- RabbitMQ (AMQP)        - port 5672 (localhost)
+    |- etcd                   - port 2379
+    '- Memcached              - port 11211 (localhost)
+```
+
+## MITRE ATT&CK Mapping
+
+![Vantage MITRE ATT&CK mapping](/images/sherlocks/vantage/mitre-mapping.svg)
+
+| Phase          | Technique                                      | Evidence                                                        |
+| -------------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| Reconnaissance | T1595.003 - Active Scanning: Wordlist Scanning | ffuf subdomain enumeration (3,579 subdomains)                   |
+| Initial Access | T1078.004 - Valid Accounts: Cloud Accounts     | Brute-forced admin:StrongAdminSecret on Horizon                 |
+| Discovery      | T1580 - Cloud Infrastructure Discovery         | Enumerated services, endpoints, users, containers               |
+| Collection     | T1530 - Data from Cloud Storage                | Downloaded user-details.csv and employee-details.csv from Swift |
+| Persistence    | T1136.003 - Create Account: Cloud Account      | Created "jellibean" with admin role                             |

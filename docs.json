@@ -124,7 +124,10 @@
           {
             "group": "DFIR",
             "root": "writeups/Sherlocks/dfir/index",
-            "pages": []
+            "pages": [
+              "writeups/Sherlocks/dfir/vantage",
+              "writeups/Sherlocks/dfir/brutus"
+            ]
           },
           {
             "group": "SOC",

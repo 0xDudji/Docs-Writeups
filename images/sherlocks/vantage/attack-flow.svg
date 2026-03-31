@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">Vantage attack flow</title>
+  <desc id="desc">Diagram showing attacker path from subdomain fuzzing to cloud persistence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08121f"/>
+      <stop offset="100%" stop-color="#0f1d2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#39d98a"/>
+      <stop offset="100%" stop-color="#00b8ff"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#64d2ff"/>
+    </marker>
+    <style>
+      .title { font: 700 42px 'Segoe UI', Arial, sans-serif; fill: #eef6ff; }
+      .subtitle { font: 400 20px 'Segoe UI', Arial, sans-serif; fill: #b4c8dc; }
+      .boxTitle { font: 700 22px 'Segoe UI', Arial, sans-serif; fill: #f4fbff; }
+      .boxText { font: 400 17px 'Segoe UI', Arial, sans-serif; fill: #d5e6f7; }
+      .small { font: 600 16px 'Segoe UI', Arial, sans-serif; fill: #90e6b0; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="820" fill="url(#bg)" rx="24"/>
+  <rect x="32" y="28" width="1336" height="764" fill="none" stroke="#1f3a55" stroke-width="2" rx="20"/>
+
+  <text x="70" y="95" class="title">HTB Sherlock: Vantage Attack Flow</text>
+  <text x="70" y="132" class="subtitle">From external recon to cloud persistence in OpenStack</text>
+
+  <rect x="80" y="210" width="260" height="150" rx="14" fill="#173552" stroke="#2f5d86" stroke-width="2"/>
+  <text x="105" y="250" class="boxTitle">1) Recon</text>
+  <text x="105" y="282" class="boxText">ffuf subdomain fuzzing</text>
+  <text x="105" y="312" class="boxText">3,579 candidates tested</text>
+  <text x="105" y="340" class="small">UA: Fuzz Faster U Fool</text>
+
+  <rect x="420" y="210" width="260" height="150" rx="14" fill="#1d3f2f" stroke="#3d7e59" stroke-width="2"/>
+  <text x="445" y="250" class="boxTitle">2) Initial Access</text>
+  <text x="445" y="282" class="boxText">Horizon login brute force</text>
+  <text x="445" y="312" class="boxText">admin:StrongAdminSecret</text>
+  <text x="445" y="340" class="small">Success via HTTP 302</text>
+
+  <rect x="760" y="210" width="260" height="150" rx="14" fill="#3a2a44" stroke="#68508a" stroke-width="2"/>
+  <text x="785" y="250" class="boxTitle">3) Credential Pivot</text>
+  <text x="785" y="282" class="boxText">Download admin-openrc.sh</text>
+  <text x="785" y="312" class="boxText">Project + auth variables</text>
+  <text x="785" y="340" class="small">CLI setup in ~75 seconds</text>
+
+  <rect x="1080" y="210" width="240" height="150" rx="14" fill="#4c2f2f" stroke="#946565" stroke-width="2"/>
+  <text x="1105" y="250" class="boxTitle">4) Discovery</text>
+  <text x="1105" y="282" class="boxText">Keystone services</text>
+  <text x="1105" y="312" class="boxText">users, endpoints, roles</text>
+  <text x="1105" y="340" class="small">openstacksdk/4.6.0</text>
+
+  <rect x="320" y="500" width="320" height="170" rx="14" fill="#193b45" stroke="#34788d" stroke-width="2"/>
+  <text x="350" y="544" class="boxTitle">5) Collection</text>
+  <text x="350" y="578" class="boxText">Swift containers discovered:</text>
+  <text x="350" y="606" class="boxText">dev-files, employee-data, user-data</text>
+  <text x="350" y="636" class="small">user-details.csv exfiltrated</text>
+
+  <rect x="760" y="500" width="380" height="170" rx="14" fill="#3e3136" stroke="#8f6a76" stroke-width="2"/>
+  <text x="790" y="544" class="boxTitle">6) Persistence</text>
+  <text x="790" y="578" class="boxText">Create cloud account: jellibean</text>
+  <text x="790" y="606" class="boxText">Password set and admin role granted</text>
+  <text x="790" y="636" class="small">MITRE T1136.003</text>
+
+  <line x1="340" y1="285" x2="420" y2="285" stroke="#64d2ff" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="680" y1="285" x2="760" y2="285" stroke="#64d2ff" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="1020" y1="285" x2="1080" y2="285" stroke="#64d2ff" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="1140" y1="360" x2="1000" y2="500" stroke="#64d2ff" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="880" y1="360" x2="560" y2="500" stroke="#64d2ff" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="70" y="715" width="1260" height="46" rx="10" fill="#10263a" stroke="url(#accent)" stroke-width="1.5"/>
+  <text x="95" y="745" class="boxText">Evidence anchors: web-server_2025-07-01.pcap, controller_2025-07-01.pcap, ffuf user-agent, OpenRC download, Swift CSV retrieval, user creation POST.</text>
+</svg>

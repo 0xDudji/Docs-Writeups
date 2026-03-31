@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700" role="img" aria-labelledby="title desc">
+  <title id="title">Vantage timeline</title>
+  <desc id="desc">Incident timeline from 09:38 to 09:48 UTC with key attacker milestones.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0c1622"/>
+      <stop offset="100%" stop-color="#081019"/>
+    </linearGradient>
+    <style>
+      .h1 { font: 700 40px 'Segoe UI', Arial, sans-serif; fill: #f1f7ff; }
+      .h2 { font: 400 19px 'Segoe UI', Arial, sans-serif; fill: #a8bfd4; }
+      .time { font: 700 20px 'Segoe UI', Arial, sans-serif; fill: #8be0ff; }
+      .txt { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d4e6f7; }
+      .minor { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #9fc0d8; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="700" rx="24" fill="url(#bg2)"/>
+  <text x="70" y="85" class="h1">Attack Timeline (UTC)</text>
+  <text x="70" y="120" class="h2">Compact view of transition from recon to persistence</text>
+
+  <line x1="90" y1="350" x2="1310" y2="350" stroke="#2f4f6c" stroke-width="6"/>
+
+  <circle cx="170" cy="350" r="14" fill="#39d98a"/>
+  <text x="132" y="305" class="time">09:38</text>
+  <text x="102" y="390" class="txt">ffuf scan starts</text>
+  <text x="90" y="415" class="minor">3,579 subdomains</text>
+
+  <circle cx="340" cy="350" r="12" fill="#5bd4ff"/>
+  <text x="302" y="305" class="time">09:39</text>
+  <text x="277" y="390" class="txt">cloud.vantage.tech</text>
+  <text x="292" y="415" class="minor">manual browsing</text>
+
+  <circle cx="520" cy="350" r="12" fill="#ffd166"/>
+  <text x="482" y="305" class="time">09:40:07</text>
+  <text x="460" y="390" class="txt">admin login success</text>
+  <text x="467" y="415" class="minor">HTTP 302 redirect</text>
+
+  <circle cx="660" cy="350" r="12" fill="#ffb86b"/>
+  <text x="622" y="305" class="time">09:40:29</text>
+  <text x="610" y="390" class="txt">OpenRC downloaded</text>
+  <text x="603" y="415" class="minor">admin-openrc.sh</text>
+
+  <circle cx="830" cy="350" r="12" fill="#a78bfa"/>
+  <text x="792" y="305" class="time">09:41:44</text>
+  <text x="780" y="390" class="txt">API interaction begins</text>
+  <text x="785" y="415" class="minor">Keystone discovery</text>
+
+  <circle cx="1030" cy="350" r="12" fill="#f78fb3"/>
+  <text x="992" y="305" class="time">09:45:23</text>
+  <text x="995" y="390" class="txt">PII data download</text>
+  <text x="965" y="415" class="minor">user-details.csv</text>
+
+  <circle cx="1230" cy="350" r="14" fill="#ff6b6b"/>
+  <text x="1192" y="305" class="time">09:48:02</text>
+  <text x="1176" y="390" class="txt">persistence created</text>
+  <text x="1138" y="415" class="minor">jellibean + admin role</text>
+
+  <rect x="70" y="500" width="1260" height="130" rx="16" fill="#0f2132" stroke="#284863" stroke-width="2"/>
+  <text x="95" y="545" class="txt">Analyst note</text>
+  <text x="95" y="580" class="minor">The 75-second gap between OpenRC download and first CLI API call strongly supports human operator transition from browser session to scripted API activity.</text>
+</svg>

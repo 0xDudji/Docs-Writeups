@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
+  <title id="title">Wireshark Step 2 TCP Conversations</title>
+  <desc id="desc">Guide showing how to use Conversations view and sort by packet count.</desc>
+  <defs>
+    <style>
+      .h { font: 700 36px 'Segoe UI', Arial, sans-serif; fill: #eaf3ff; }
+      .s { font: 500 20px 'Segoe UI', Arial, sans-serif; fill: #b8cbe0; }
+      .t { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d6e7f7; }
+      .b { font: 700 16px 'Segoe UI', Arial, sans-serif; fill: #0f2336; }
+    </style>
+  </defs>
+  <rect width="1400" height="780" fill="#111a28" rx="20"/>
+  <text x="56" y="72" class="h">Wireshark Step 2: TCP Conversations</text>
+  <text x="56" y="108" class="s">Goal: find noisy source IPs and suspicious high-volume sessions</text>
+
+  <rect x="56" y="140" width="1288" height="560" rx="14" fill="#1b2637" stroke="#334d69"/>
+  <rect x="82" y="190" width="1240" height="70" rx="10" fill="#f6fbff"/>
+  <text x="104" y="233" class="b">Statistics > Conversations > TCP</text>
+
+  <rect x="82" y="280" width="1240" height="320" rx="10" fill="#0f1f30" stroke="#406080"/>
+  <rect x="92" y="292" width="1220" height="36" fill="#23405a" rx="6"/>
+  <text x="110" y="316" class="t">Address A           Address B            Port A  Port B  Packets  Bytes   Duration</text>
+  <rect x="94" y="336" width="1216" height="42" fill="#203246"/>
+  <text x="110" y="362" class="t">117.200.21.26      157.230.81.229       53012   80      20133    ...     ...</text>
+  <rect x="94" y="380" width="1216" height="42" fill="#142535"/>
+  <text x="110" y="406" class="t">10.116.0.3         10.116.0.4           44720   80      252      ...     ...</text>
+
+  <rect x="1000" y="244" width="210" height="42" rx="8" fill="#7ee787"/>
+  <text x="1028" y="272" class="b">Sort by Packets</text>
+
+  <line x1="1080" y1="286" x2="1080" y2="336" stroke="#7ee787" stroke-width="4"/>
+  <polygon points="1080,336 1070,322 1090,322" fill="#7ee787"/>
+
+  <text x="82" y="650" class="t">Tip: Highest packet conversation usually reveals scanning or automated traffic first.</text>
+</svg>

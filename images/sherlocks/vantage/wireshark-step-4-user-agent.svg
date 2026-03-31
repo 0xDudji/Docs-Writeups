@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
+  <title id="title">Wireshark Step 4 User Agent</title>
+  <desc id="desc">Instructional visual for expanding HTTP headers and locating User Agent values.</desc>
+  <defs>
+    <style>
+      .h { font: 700 36px 'Segoe UI', Arial, sans-serif; fill: #edf5ff; }
+      .s { font: 500 20px 'Segoe UI', Arial, sans-serif; fill: #bfd2e6; }
+      .t { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d6e7f7; }
+      .k { font: 700 15px 'Consolas', monospace; fill: #b6f7d3; }
+    </style>
+  </defs>
+  <rect width="1400" height="780" fill="#0f1726" rx="20"/>
+  <text x="56" y="72" class="h">Wireshark Step 4: Identify User-Agent</text>
+  <text x="56" y="108" class="s">Goal: distinguish automated fuzzing from manual browser activity</text>
+
+  <rect x="56" y="150" width="1288" height="560" rx="14" fill="#1c2739" stroke="#355271"/>
+  <rect x="82" y="188" width="1240" height="42" rx="8" fill="#24425e"/>
+  <text x="100" y="215" class="t">Packet details pane</text>
+
+  <rect x="82" y="242" width="1240" height="430" rx="10" fill="#0f1f32"/>
+  <text x="110" y="280" class="t">Frame 8421: 612 bytes on wire...</text>
+  <text x="110" y="312" class="t">Ethernet II</text>
+  <text x="110" y="344" class="t">Internet Protocol Version 4</text>
+  <text x="110" y="376" class="t">Transmission Control Protocol</text>
+  <text x="110" y="408" class="t">Hypertext Transfer Protocol</text>
+
+  <rect x="106" y="422" width="520" height="34" rx="6" fill="#9fd3ff"/>
+  <text x="124" y="444" style="font:700 15px 'Segoe UI'; fill:#0f2336;">Expand this section</text>
+
+  <text x="150" y="492" class="k">User-Agent: Fuzz Faster U Fool v2.1.0-dev</text>
+  <text x="150" y="526" class="k">User-Agent: Mozilla/5.0 ... Chrome/137.0.0.0</text>
+
+  <rect x="760" y="250" width="520" height="340" rx="12" fill="#11293d" stroke="#3e678c"/>
+  <text x="788" y="296" class="t">Interpretation</text>
+  <text x="788" y="336" class="t">- ffuf user-agent indicates automated discovery phase</text>
+  <text x="788" y="370" class="t">- Chrome user-agent indicates manual operator actions</text>
+  <text x="788" y="404" class="t">- Transition point marks successful target identification</text>
+</svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
+  <title id="title">Wireshark Step 3 HTTP Filters</title>
+  <desc id="desc">Guide for applying HTTP request filters by source IP.</desc>
+  <defs>
+    <style>
+      .h { font: 700 36px 'Segoe UI', Arial, sans-serif; fill: #ecf4ff; }
+      .s { font: 500 20px 'Segoe UI', Arial, sans-serif; fill: #bed0e3; }
+      .t { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d6e7f7; }
+      .k { font: 700 19px 'Consolas', monospace; fill: #0f2b42; }
+    </style>
+  </defs>
+  <rect width="1400" height="780" fill="#101826" rx="20"/>
+  <text x="56" y="72" class="h">Wireshark Step 3: Filter HTTP Requests</text>
+  <text x="56" y="108" class="s">Goal: isolate attacker web traffic fast</text>
+
+  <rect x="56" y="150" width="1288" height="64" rx="10" fill="#86d6ff"/>
+  <text x="82" y="191" class="k">http.request and ip.src == 117.200.21.26</text>
+
+  <rect x="56" y="230" width="1288" height="470" rx="14" fill="#1b2738" stroke="#385674"/>
+  <rect x="74" y="252" width="1252" height="38" fill="#27435f" rx="6"/>
+  <text x="90" y="277" class="t">No.   Time       Source         Destination     Protocol  Info</text>
+  <rect x="74" y="298" width="1252" height="38" fill="#193147"/>
+  <text x="90" y="322" class="t">...   09:38:14   117.200.21.26  157.230.81.229  HTTP      GET / Host: 1.vantage.tech</text>
+  <rect x="74" y="340" width="1252" height="38" fill="#13283b"/>
+  <text x="90" y="364" class="t">...   09:39:07   117.200.21.26  157.230.81.229  HTTP      GET / Host: cloud.vantage.tech</text>
+
+  <rect x="90" y="430" width="1220" height="220" rx="10" fill="#11273d" stroke="#2f5678"/>
+  <text x="118" y="470" class="t">Useful variants</text>
+  <text x="118" y="505" class="t">- http.request and ip.src == 117.200.21.26 and http.user_agent contains "Fuzz"</text>
+  <text x="118" y="535" class="t">- http.request and ip.src == 117.200.21.26 and http.user_agent contains "Chrome"</text>
+  <text x="118" y="565" class="t">- http.request.method == POST and http.request.uri contains "/dashboard/auth/login"</text>
+</svg>
