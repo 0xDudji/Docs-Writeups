@@ -12,8 +12,6 @@ description: "HTB Sherlock Brutus investigation writeup (auth.log and wtmp DFIR)
 
 > Based on the official writeup by Cyberjunkie and Sebh24, and the video walkthrough by IppSec which includes a "Beyond Root" section covering Grok-based log parsing.
 
-![Brutus attack flow diagram](/images/sherlocks/brutus/attack-flow.svg)
-
 ---
 
 ## Scenario
@@ -74,8 +72,6 @@ TZ=UTC who -a wtmp
 
 > **Tip from IppSec:** If `last -f wtmp` gives a SQLite error on newer Kali versions, this is because newer systemd versions use a database format. The file you're analyzing is the older binary format. Use `utmpdump` or `who -a` as alternatives, or use the `utmp.py` script provided by HTB.
 
-![Brutus wtmp correlation guide](/images/sherlocks/brutus/wtmp-correlation.svg)
-
 ---
 
 ## Initial Exploration (Before Answering Questions)
@@ -91,6 +87,7 @@ awk '{print $5}' auth.log | sed 's/[\[\:].*//g' | sort | uniq -c | sort -n > log
 ```
 
 **How this works:**
+
 - `awk '{print $5}'` - Extracts the 5th field (program name + PID, e.g., `sshd[1234]:`)
 - `sed 's/[\[\:].*//g'` - Strips everything from the first `[` or `:` onward, leaving just the program name
 - `sort | uniq -c | sort -n` - Counts occurrences and sorts numerically
@@ -109,8 +106,6 @@ This immediately shows you login sessions, source IPs, and session durations - g
 
 Compare timestamps between auth.log and wtmp for the same event. If a login shows at the same time in both, the auth.log is already in UTC.
 
-![Brutus authlog workflow](/images/sherlocks/brutus/authlog-analysis.svg)
-
 ---
 
 ## Questions and Answers
@@ -124,7 +119,7 @@ Compare timestamps between auth.log and wtmp for the same event. If a login show
 grep -oP ' \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' auth.log | sort | uniq -c | sort -n
 ```
 
-The IP with 165 connection attempts in rapid succession (all within seconds of each other) stands out immediately. A useful rule of thumb from the writeup: *"Could a human attempt to authenticate this often manually?"* - if the answer is no, investigate further.
+The IP with 165 connection attempts in rapid succession (all within seconds of each other) stands out immediately. A useful rule of thumb from the writeup: _"Could a human attempt to authenticate this often manually?"_ - if the answer is no, investigate further.
 
 You can also filter sshd lines and exclude noise:
 
@@ -155,8 +150,9 @@ The first "Accepted password" from this IP is for the `root` account. Notice tha
 **Method:** The question specifically asks for the wtmp timestamp, not auth.log.
 
 There's an important distinction here:
-- **auth.log** records when the password was *accepted* (authentication event)
-- **wtmp** records when the interactive *terminal session* was created (login event)
+
+- **auth.log** records when the password was _accepted_ (authentication event)
+- **wtmp** records when the interactive _terminal session_ was created (login event)
 
 These can differ by a second or more. The attacker authenticated at 06:32:44 in auth.log, but the terminal session was established at 06:32:45 in wtmp.
 
@@ -214,6 +210,7 @@ The attacker added `cyberjunkie` to the `sudo` group, granting full administrati
 ### Q6: What is the MITRE ATT&CK sub-technique ID for persistence via new account creation?
 
 The MITRE ATT&CK framework categorizes this under:
+
 - **Tactic:** Persistence
 - **Technique:** Create Account (T1136)
 - **Sub-technique:** Local Account (T1136.001)
@@ -252,6 +249,7 @@ grep "sudo:" auth.log | grep "cyberjunkie"
 ```
 
 Two sudo commands are visible:
+
 1. `cat /etc/shadow` - The attacker dumped password hashes
 2. `curl` to download a persistence toolkit
 
@@ -291,6 +289,7 @@ Grok is a pattern matching syntax originally created for Logstash (part of the E
 ```
 
 For example:
+
 - `%{IP:source_ip}` - Matches an IP address and assigns it to a field called `source_ip`
 - `%{WORD:username}` - Matches a single word and calls it `username`
 - `%{BASE10NUM:pid}` - Matches a number and calls it `pid`
@@ -304,6 +303,7 @@ For example:
 An online tool similar to regex101 but for Grok patterns. You paste a log line, write your Grok pattern, and it shows you the matched fields in real-time. This is invaluable for iterating on patterns before writing code.
 
 Key features:
+
 - Live match highlighting
 - Autocomplete for pattern names
 - Built-in pattern reference (WORD, IP, DATA, BASE10NUM, SYSLOGBASE2, etc.)
@@ -337,15 +337,18 @@ Test this in the Grok Debugger first. Note that `WORD` won't work for the progra
 #### Step 3: Create patterns for each log message type
 
 **SSH auth pattern (handles both "invalid user" and valid user lines):**
+
 ```text
 %{LOG_PREFIX} %{WORD:result} %{WORD:login_type} for (invalid user )?%{DATA:username} from %{IP:source_ip} port %{BASE10NUM:client_port} %{WORD:protocol}
 ```
 
 The `(invalid user )?` makes "invalid user" optional, so the same pattern matches both:
+
 - `Failed password for invalid user admin from 65.2.161.68 port 46392 ssh2`
 - `Failed password for backup from 65.2.161.68 port 46512 ssh2`
 
 **systemd-logind session pattern:**
+
 ```text
 %{LOG_PREFIX} %{WORD:status} session %{BASE10NUM:session_id}( of user %{USERNAME:username})?\.
 ```
@@ -353,11 +356,13 @@ The `(invalid user )?` makes "invalid user" optional, so the same pattern matche
 The conditional `( of user ...)?` handles both "New session 37 of user root." and "Removed session 37." - the trailing period is matched literally, which is important because Grok's optional operator needs a character after the closing parenthesis.
 
 **useradd pattern:**
+
 ```text
 %{LOG_PREFIX} new user: name=%{USERNAME:username}, UID=%{BASE10NUM:uid}, GID=%{BASE10NUM:gid}, home=%{UNIXPATH:home_dir}, shell=%{UNIXPATH:shell}, from=%{UNIXPATH:from}
 ```
 
 **sudo pattern:**
+
 ```text
 %{LOG_PREFIX} %{USERNAME:user} : TTY=%{WORD:tty} ; PWD=%{UNIXPATH:pwd} ; USER=%{USERNAME:tgt_user} ; COMMAND=%{GREEDYDATA:command}
 ```
@@ -450,8 +455,6 @@ go run main.go | grep -i "sudo" | jq '{user, tgt_user, command}'
 go run main.go | grep "cyberjunkie" | jq '.user + " ran as " + .tgt_user + " with command: " + .command'
 ```
 
-![Brutus grok parsing pipeline](/images/sherlocks/brutus/grok-pipeline.svg)
-
 ### Why This Matters for Defenders
 
 As IppSec explains, this Grok-based approach is how logs are processed at scale in real SOC environments:
@@ -469,21 +472,19 @@ The Grok Debugger at https://grokdebugger.com/ is your best friend when building
 
 ## Attack Timeline Summary
 
-![Brutus incident timeline](/images/sherlocks/brutus/timeline.svg)
-
-| Time (UTC) | Event | Source |
-|---|---|---|
-| 06:31:31 | Brute force begins from 65.2.161.68 | auth.log |
-| 06:31:40 | First successful root login (automated - immediate disconnect) | auth.log |
-| 06:32:44 | Second successful root login (manual - session persists) | auth.log |
-| 06:32:45 | Interactive terminal session established | wtmp |
-| 06:34:18 | New user `cyberjunkie` created (UID 1002) | auth.log |
-| 06:34:26 | Password set for `cyberjunkie` | auth.log |
-| 06:35:15 | `cyberjunkie` added to sudo group | auth.log |
-| 06:37:24 | Root session 37 closed | auth.log |
-| 06:37:34 | `cyberjunkie` logs in | auth.log |
-| 06:37:57 | `cyberjunkie` runs `sudo cat /etc/shadow` | auth.log |
-| 06:39:38 | `cyberjunkie` downloads linper.sh persistence toolkit via sudo curl | auth.log |
+| Time (UTC) | Event                                                               | Source   |
+| ---------- | ------------------------------------------------------------------- | -------- |
+| 06:31:31   | Brute force begins from 65.2.161.68                                 | auth.log |
+| 06:31:40   | First successful root login (automated - immediate disconnect)      | auth.log |
+| 06:32:44   | Second successful root login (manual - session persists)            | auth.log |
+| 06:32:45   | Interactive terminal session established                            | wtmp     |
+| 06:34:18   | New user `cyberjunkie` created (UID 1002)                           | auth.log |
+| 06:34:26   | Password set for `cyberjunkie`                                      | auth.log |
+| 06:35:15   | `cyberjunkie` added to sudo group                                   | auth.log |
+| 06:37:24   | Root session 37 closed                                              | auth.log |
+| 06:37:34   | `cyberjunkie` logs in                                               | auth.log |
+| 06:37:57   | `cyberjunkie` runs `sudo cat /etc/shadow`                           | auth.log |
+| 06:39:38   | `cyberjunkie` downloads linper.sh persistence toolkit via sudo curl | auth.log |
 
 ---
 
