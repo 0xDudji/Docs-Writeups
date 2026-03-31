@@ -1,35 +1,70 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
-  <title id="title">Wireshark Step 2 TCP Conversations</title>
-  <desc id="desc">Guide showing how to use Conversations view and sort by packet count.</desc>
+  <title id="title">Wireshark Step 2 Endpoints and Conversations</title>
+  <desc id="desc">Wireshark-style split view showing Endpoints for per-IP totals and Conversations for per-stream behavior.</desc>
   <defs>
     <style>
-      .h { font: 700 36px 'Segoe UI', Arial, sans-serif; fill: #eaf3ff; }
-      .s { font: 500 20px 'Segoe UI', Arial, sans-serif; fill: #b8cbe0; }
-      .t { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d6e7f7; }
-      .b { font: 700 16px 'Segoe UI', Arial, sans-serif; fill: #0f2336; }
+      .title { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; }
+      .sub { font: 500 18px 'Segoe UI', Arial, sans-serif; fill: #9fb3c8; }
+      .ui { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #d8e2ec; }
+      .mono { font: 600 14px 'Consolas', 'Courier New', monospace; fill: #d8e2ec; }
+      .call { font: 600 15px 'Segoe UI', Arial, sans-serif; fill: #12263a; }
+      .callSmall { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #17334b; }
     </style>
   </defs>
-  <rect width="1400" height="780" fill="#111a28" rx="20"/>
-  <text x="56" y="72" class="h">Wireshark Step 2: TCP Conversations</text>
-  <text x="56" y="108" class="s">Goal: find noisy source IPs and suspicious high-volume sessions</text>
 
-  <rect x="56" y="140" width="1288" height="560" rx="14" fill="#1b2637" stroke="#334d69"/>
-  <rect x="82" y="190" width="1240" height="70" rx="10" fill="#f6fbff"/>
-  <text x="104" y="233" class="b">Statistics > Conversations > TCP</text>
+  <rect width="1400" height="780" fill="#0d1117" rx="16"/>
+  <text x="36" y="48" class="title">Step 2 - Endpoints then Conversations</text>
+  <text x="36" y="78" class="sub">First find dominant IPs, then inspect how the traffic is structured.</text>
 
-  <rect x="82" y="280" width="1240" height="320" rx="10" fill="#0f1f30" stroke="#406080"/>
-  <rect x="92" y="292" width="1220" height="36" fill="#23405a" rx="6"/>
-  <text x="110" y="316" class="t">Address A           Address B            Port A  Port B  Packets  Bytes   Duration</text>
-  <rect x="94" y="336" width="1216" height="42" fill="#203246"/>
-  <text x="110" y="362" class="t">117.200.21.26      157.230.81.229       53012   80      20133    ...     ...</text>
-  <rect x="94" y="380" width="1216" height="42" fill="#142535"/>
-  <text x="110" y="406" class="t">10.116.0.3         10.116.0.4           44720   80      252      ...     ...</text>
+  <rect x="34" y="100" width="960" height="640" rx="10" fill="#1f242d" stroke="#3a4451"/>
+  <rect x="34" y="100" width="960" height="30" fill="#2b313c"/>
+  <text x="48" y="120" class="ui">web-server_2025-07-01.pcap - Wireshark</text>
+  <rect x="34" y="130" width="960" height="28" fill="#242b35"/>
+  <text x="48" y="149" class="ui">Statistics > Endpoints > IPv4</text>
 
-  <rect x="1000" y="244" width="210" height="42" rx="8" fill="#7ee787"/>
-  <text x="1028" y="272" class="b">Sort by Packets</text>
+  <rect x="52" y="172" width="924" height="246" rx="6" fill="#181d25" stroke="#4b5563"/>
+  <rect x="60" y="180" width="908" height="24" fill="#243041"/>
+  <text x="68" y="197" class="mono">Address              Packets         Bytes</text>
 
-  <line x1="1080" y1="286" x2="1080" y2="336" stroke="#7ee787" stroke-width="4"/>
-  <polygon points="1080,336 1070,322 1090,322" fill="#7ee787"/>
+  <rect x="60" y="208" width="908" height="30" fill="#1f2937"/>
+  <text x="68" y="228" class="mono">157.230.81.229        21,348         14.6 MB</text>
 
-  <text x="82" y="650" class="t">Tip: Highest packet conversation usually reveals scanning or automated traffic first.</text>
+  <rect x="60" y="240" width="908" height="32" fill="#5c2222"/>
+  <text x="68" y="261" class="mono">117.200.21.26         20,897         14.5 MB   (97.9%)</text>
+
+  <rect x="60" y="274" width="908" height="28" fill="#233a56"/>
+  <text x="68" y="293" class="mono">10.116.0.3               256          112 KB</text>
+  <rect x="60" y="304" width="908" height="28" fill="#233a56"/>
+  <text x="68" y="323" class="mono">10.116.0.4               256          112 KB</text>
+  <text x="68" y="356" class="mono">60+ other IPs: 2 to 243 packets each</text>
+
+  <rect x="34" y="430" width="960" height="310" rx="10" fill="#1f242d" stroke="#3a4451"/>
+  <rect x="34" y="430" width="960" height="30" fill="#2b313c"/>
+  <text x="48" y="450" class="ui">Statistics > Conversations > TCP</text>
+
+  <rect x="52" y="468" width="924" height="246" rx="6" fill="#181d25" stroke="#4b5563"/>
+  <rect x="60" y="476" width="908" height="24" fill="#243041"/>
+  <text x="68" y="493" class="mono">Address A                 Address B              Port B  Pkts Total  Duration</text>
+
+  <rect x="60" y="504" width="908" height="30" fill="#5c2222"/>
+  <text x="68" y="524" class="mono">117.200.21.26:64728       157.230.81.229:80       80         497      22.6s</text>
+  <rect x="60" y="536" width="908" height="30" fill="#5c2222"/>
+  <text x="68" y="556" class="mono">117.200.21.26:64727       157.230.81.229:80       80         489      22.7s</text>
+  <rect x="60" y="568" width="908" height="30" fill="#5c2222"/>
+  <text x="68" y="588" class="mono">117.200.21.26:64756       157.230.81.229:80       80         487      22.6s</text>
+  <text x="68" y="620" class="mono">... about 184 more rows like this ...</text>
+  <text x="68" y="646" class="mono">10.116.0.3:39200          10.116.0.4:80           80          42       1.2s</text>
+
+  <rect x="1020" y="140" width="350" height="220" rx="8" fill="#d3f4ff"/>
+  <text x="1036" y="166" class="call">Read this in order</text>
+  <text x="1036" y="190" class="callSmall">1) Endpoints: one row per IP.</text>
+  <text x="1036" y="212" class="callSmall">   117.200.21.26 dominates volume.</text>
+  <text x="1036" y="234" class="callSmall">2) Conversations: one row per stream.</text>
+  <text x="1036" y="256" class="callSmall">   Around 187 similar streams from</text>
+  <text x="1036" y="278" class="callSmall">   same IP to port 80 = automation.</text>
+  <text x="1036" y="300" class="callSmall">3) Smaller 10.116.0.3 -> 10.116.0.4</text>
+  <text x="1036" y="322" class="callSmall">   traffic suggests proxy forwarding.</text>
+
+  <line x1="996" y1="256" x2="1020" y2="256" stroke="#58d0ff" stroke-width="3"/>
+  <line x1="996" y1="560" x2="1020" y2="310" stroke="#58d0ff" stroke-width="3"/>
 </svg>

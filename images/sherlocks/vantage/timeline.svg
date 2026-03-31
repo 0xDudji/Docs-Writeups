@@ -1,62 +1,64 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700" role="img" aria-labelledby="title desc">
   <title id="title">Vantage timeline</title>
-  <desc id="desc">Incident timeline from 09:38 to 09:48 UTC with key attacker milestones.</desc>
+  <desc id="desc">Wireshark-style incident timeline with UTC events split by source capture and pivot explanation.</desc>
   <defs>
-    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#0c1622"/>
-      <stop offset="100%" stop-color="#081019"/>
-    </linearGradient>
     <style>
-      .h1 { font: 700 40px 'Segoe UI', Arial, sans-serif; fill: #f1f7ff; }
-      .h2 { font: 400 19px 'Segoe UI', Arial, sans-serif; fill: #a8bfd4; }
-      .time { font: 700 20px 'Segoe UI', Arial, sans-serif; fill: #8be0ff; }
-      .txt { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #d4e6f7; }
-      .minor { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #9fc0d8; }
+      .title { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; }
+      .sub { font: 500 18px 'Segoe UI', Arial, sans-serif; fill: #9fb3c8; }
+      .ui { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #d8e2ec; }
+      .mono { font: 600 14px 'Consolas', 'Courier New', monospace; fill: #d8e2ec; }
+      .noteT { font: 600 15px 'Segoe UI', Arial, sans-serif; fill: #12263a; }
+      .noteS { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #17334b; }
     </style>
   </defs>
 
-  <rect width="1400" height="700" rx="24" fill="url(#bg2)"/>
-  <text x="70" y="85" class="h1">Attack Timeline (UTC)</text>
-  <text x="70" y="120" class="h2">Compact view of transition from recon to persistence</text>
+  <rect width="1400" height="700" fill="#0d1117" rx="16"/>
+  <text x="36" y="48" class="title">Incident Timeline (UTC)</text>
+  <text x="36" y="78" class="sub">Chronological bridge from web activity to controller-side API operations.</text>
 
-  <line x1="90" y1="350" x2="1310" y2="350" stroke="#2f4f6c" stroke-width="6"/>
+  <rect x="34" y="100" width="1332" height="560" rx="10" fill="#1f242d" stroke="#3a4451"/>
+  <rect x="34" y="100" width="1332" height="30" fill="#2b313c"/>
+  <text x="48" y="120" class="ui">Timeline board</text>
 
-  <circle cx="170" cy="350" r="14" fill="#39d98a"/>
-  <text x="132" y="305" class="time">09:38</text>
-  <text x="102" y="390" class="txt">ffuf scan starts</text>
-  <text x="90" y="415" class="minor">3,579 subdomains</text>
+  <line x1="90" y1="300" x2="1310" y2="300" stroke="#3f4b5a" stroke-width="4"/>
 
-  <circle cx="340" cy="350" r="12" fill="#5bd4ff"/>
-  <text x="302" y="305" class="time">09:39</text>
-  <text x="277" y="390" class="txt">cloud.vantage.tech</text>
-  <text x="292" y="415" class="minor">manual browsing</text>
+  <text x="90" y="230" class="mono">web-server pcap</text>
+  <circle cx="170" cy="300" r="10" fill="#2ea043"/>
+  <text x="120" y="276" class="mono">09:38</text>
+  <text x="96" y="334" class="mono">ffuf scan starts</text>
 
-  <circle cx="520" cy="350" r="12" fill="#ffd166"/>
-  <text x="482" y="305" class="time">09:40:07</text>
-  <text x="460" y="390" class="txt">admin login success</text>
-  <text x="467" y="415" class="minor">HTTP 302 redirect</text>
+  <circle cx="360" cy="300" r="10" fill="#58a6ff"/>
+  <text x="312" y="276" class="mono">09:39:07</text>
+  <text x="292" y="334" class="mono">cloud.vantage.tech found</text>
 
-  <circle cx="660" cy="350" r="12" fill="#ffb86b"/>
-  <text x="622" y="305" class="time">09:40:29</text>
-  <text x="610" y="390" class="txt">OpenRC downloaded</text>
-  <text x="603" y="415" class="minor">admin-openrc.sh</text>
+  <circle cx="560" cy="300" r="10" fill="#e3b341"/>
+  <text x="504" y="276" class="mono">09:40:07</text>
+  <text x="474" y="334" class="mono">successful login (HTTP 302)</text>
 
-  <circle cx="830" cy="350" r="12" fill="#a78bfa"/>
-  <text x="792" y="305" class="time">09:41:44</text>
-  <text x="780" y="390" class="txt">API interaction begins</text>
-  <text x="785" y="415" class="minor">Keystone discovery</text>
+  <circle cx="730" cy="300" r="10" fill="#ff9f1c"/>
+  <text x="674" y="276" class="mono">09:40:29</text>
+  <text x="644" y="334" class="mono">admin-openrc.sh downloaded</text>
 
-  <circle cx="1030" cy="350" r="12" fill="#f78fb3"/>
-  <text x="992" y="305" class="time">09:45:23</text>
-  <text x="995" y="390" class="txt">PII data download</text>
-  <text x="965" y="415" class="minor">user-details.csv</text>
+  <text x="910" y="230" class="mono">controller pcap</text>
+  <circle cx="980" cy="300" r="10" fill="#a371f7"/>
+  <text x="924" y="276" class="mono">09:41:44</text>
+  <text x="884" y="334" class="mono">first direct API call</text>
 
-  <circle cx="1230" cy="350" r="14" fill="#ff6b6b"/>
-  <text x="1192" y="305" class="time">09:48:02</text>
-  <text x="1176" y="390" class="txt">persistence created</text>
-  <text x="1138" y="415" class="minor">jellibean + admin role</text>
+  <circle cx="1140" cy="300" r="10" fill="#f778ba"/>
+  <text x="1084" y="276" class="mono">09:45:23</text>
+  <text x="1058" y="334" class="mono">PII CSV downloaded</text>
 
-  <rect x="70" y="500" width="1260" height="130" rx="16" fill="#0f2132" stroke="#284863" stroke-width="2"/>
-  <text x="95" y="545" class="txt">Analyst note</text>
-  <text x="95" y="580" class="minor">The 75-second gap between OpenRC download and first CLI API call strongly supports human operator transition from browser session to scripted API activity.</text>
+  <circle cx="1270" cy="300" r="10" fill="#ff6b6b"/>
+  <text x="1214" y="276" class="mono">09:48:02</text>
+  <text x="1172" y="334" class="mono">jellibean account created</text>
+
+  <line x1="730" y1="360" x2="980" y2="360" stroke="#58d0ff" stroke-width="3" stroke-dasharray="7 6"/>
+  <rect x="792" y="372" width="130" height="24" rx="6" fill="#d3f4ff"/>
+  <text x="806" y="389" style="font:600 12px 'Segoe UI'; fill:#12324e;">about 75 sec gap</text>
+
+  <rect x="70" y="430" width="1260" height="200" rx="8" fill="#d3f4ff"/>
+  <text x="88" y="456" class="noteT">Why this timeline matters</text>
+  <text x="88" y="480" class="noteS">The OpenRC download is the handoff point. Soon after, direct controller API requests start with OpenStack SDK user-agent values.</text>
+  <text x="88" y="502" class="noteS">This timing sequence supports one coherent story: web compromise first, then authenticated cloud API abuse, then data theft, then persistence.</text>
+  <text x="88" y="524" class="noteS">Use this panel to answer "when did the pivot happen" and "what happened immediately before and after".</text>
 </svg>
