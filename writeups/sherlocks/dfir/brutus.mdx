@@ -3,29 +3,13 @@ title: "Brutus"
 description: "HTB Sherlock Brutus investigation writeup (auth.log and wtmp DFIR)."
 ---
 
-# Brutus Sherlock - Comprehensive Writeup
-
-**Platform:** HackTheBox Sherlocks  
 **Difficulty:** Very Easy  
 **Author:** Cyberjunkie  
 **Focus:** Unix auth.log analysis, wtmp analysis, brute-force investigation, post-exploitation tracking
 
-> Based on the official writeup by Cyberjunkie and Sebh24, and the video walkthrough by IppSec which includes a "Beyond Root" section covering Grok-based log parsing.
-
----
-
 ## Scenario
 
 A Confluence server was brute-forced via its SSH service. After gaining access, the attacker performed additional activities including privilege escalation, persistence (creating a new user), and downloading tools. We investigate using `auth.log` and `wtmp` artifacts.
-
----
-
-## Artifacts Provided
-
-- **auth.log** - Linux authentication log (plaintext). Records all authentication events: SSH logins, sudo usage, user creation, group modifications, cron sessions, etc.
-- **wtmp** - Binary login/logout log. Records interactive terminal sessions, system boots, and runlevel changes. Read with `last`, `utmpdump`, or `who`.
-
-**SHA256 of Brutus.zip:** `dd7742375a19b6ccc4323058224460a5220c43d4e9f7565b653bd369b8c46b2d`
 
 ---
 
