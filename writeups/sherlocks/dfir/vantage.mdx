@@ -237,18 +237,23 @@ downloaded, what the server responded with.
 http.request.method == POST && http.request.uri contains "/dashboard/auth/login" && ip.src == 117.200.21.26
 ```
 
-> **Why the `ip.src` clause is essential:** If you omit `&& ip.src == 117.200.21.26`, this filter
-> returns **8 packets, not 4**. Because the web-server PCAP captures a reverse proxy, every request
-> from the attacker to the proxy (`117.200.21.26 to 157.230.81.229`) is also captured as an
-> internally forwarded request (`10.116.0.3 to 10.116.0.4`). Each login attempt appears twice. Adding
-> `ip.src == 117.200.21.26` limits results to the original attacker-side requests only.
+> **Why the `ip.src` clause is essential:** Without it, this filter returns **8 packets, not 4**.
+> Because this machine is a reverse proxy, every inbound request from the attacker
+> (`117.200.21.26 → 157.230.81.229`) is immediately forwarded internally to the backend app server
+> (`10.116.0.3 → 10.116.0.4`). Both hops are captured in this one PCAP file, so each login attempt
+> appears twice. Adding `ip.src == 117.200.21.26` limits results to the original attacker-side
+> packets only, giving you the complete request bodies.
 
 This gives you exactly **4 POST packets** - one per login attempt. Click the first one, then
 right-click > **Follow > TCP Stream**.
 
-The stream reconstructs the full HTTP conversation - the complete request (shown in red) and the
-complete response (shown in blue). The POST body is URL-encoded. Here is what you will actually see
-(line-wrapped for readability):
+**What you see in the stream window:** Wireshark colours the two sides of the conversation
+differently. By default, the client's data (the attacker's request) is shown in **red** and the
+server's response in **blue**. The stream shows everything in one continuous scroll: the HTTP
+request headers, then a blank line, then the POST body, then the server's response headers, then
+the response body.
+
+The POST body you will see (line-wrapped here for readability):
 
 ```
 csrfmiddlewaretoken=UX4dve2DwuDo171EEgnpZaxni395EA5ijYsOoOoHwPUbGqAOKcR7Y4qns2yWIb74
@@ -262,29 +267,22 @@ csrfmiddlewaretoken=UX4dve2DwuDo171EEgnpZaxni395EA5ijYsOoOoHwPUbGqAOKcR7Y4qns2yW
 
 **What each field means:**
 
-- `csrfmiddlewaretoken` - Django's Cross-Site Request Forgery protection token. It changes with
-  every session. Ignore it.
+- `csrfmiddlewaretoken` - Django's Cross-Site Request Forgery protection token. It rotates with
+  every new session and is not useful for our investigation. Ignore it.
 - `fake_email` / `fake_password` - Honeypot fields that OpenStack Horizon adds to its login form
-  to trip up naive credential-stuffing bots. They are always empty for a real browser submitting the
-  form. Ignore them.
+  to catch naive credential-stuffing bots. A real browser always leaves them empty. Ignore them.
 - `username` / `password` - The credentials you're looking for.
 - `region` - The OpenStack region name, always `default` here.
 
-**How to tell success from failure without reading the HTML:** Look at the HTTP response status line.
-For Horizon login forms:
+**How to tell success from failure:** The server's response appears in blue in the same stream
+window, immediately below the request. You do not need to read the HTML body. Just look at the
+first line of the response:
 
-- **HTTP 200 OK** - The server re-rendered the login page. **Login failed**
-- **HTTP 302 Found** (redirect to `/dashboard/`). **Login succeeded**
+- **`HTTP/1.1 200 OK`**: the server re-rendered the login page. **Login failed.**
+- **`HTTP/1.1 302 Found`** with `Location: /dashboard/`: the server redirected to the dashboard.
+  **Login succeeded.**
 
-The response appears in the same TCP stream window, immediately after the blank line that ends the
-request. You can also filter for just the response codes:
-
-```
-tcp.stream == <stream_id> && http.response.code
-```
-
-(substitute `<stream_id>` with the stream number shown in the packet detail pane for the packet you
-clicked)
+Repeat this for all four POST packets to build the full picture:
 
 | Attempt  | Credentials               | Response  | Result  |
 | -------- | ------------------------- | --------- | ------- |
@@ -301,39 +299,30 @@ clicked)
 http.request.uri contains "openrc" && ip.src == 117.200.21.26
 ```
 
-One packet matches. Click it, right-click > **Follow > TCP Stream**.
+One packet matches. Click it, then right-click > **Follow > TCP Stream**.
 
-You'll see the request headers clearly, and the response headers, including a
-`Content-Disposition` header with filename `admin-openrc.sh`, which confirms the file name.
-However, the response body will display as binary garbage:
+The request headers are clearly readable in red. You can see the GET to
+`/dashboard/project/api_access/openrc/`. Scrolling down to the blue response, the headers confirm:
 
 ```
-HTTP/1.1 200 OK
-...
+Content-Disposition: attachment; filename="admin-openrc.sh"
 Content-Encoding: gzip
-...
-
-3dc
-...........lTm..H......+]..........B{\[@.\u:...
 ```
 
-> **The response is gzip-compressed.** The server sends `Content-Encoding: gzip`, so the Follow TCP
-> Stream window shows the raw compressed bytes - not readable text. **Do not try to read the file
-> content from the TCP stream window.** This is the most common point of confusion for this task.
+After the headers, the response body is binary garbage (compressed bytes that Wireshark cannot
+display as text). **Do not try to read the file content from the TCP stream window.** This is the
+most common point of confusion for this task.
 
-To read the actual plaintext file, use Wireshark's built-in HTTP object export, which automatically
-decompresses gzip-encoded responses:
+To read the actual file, use Wireshark's HTTP object export, which automatically decompresses the
+response:
 
 1. Go to **File > Export Objects > HTTP...**
-2. In the list that appears, find the row with `admin-openrc.sh` in the Filename column.
-3. Click **Save** to write it to disk, then open it in a text editor.
+2. Find the row with `admin-openrc.sh` in the Filename column.
+3. Click **Save**, then open the file in a text editor.
 
 The decompressed content confirms everything we've identified so far:
 
 ```bash
-#!/usr/bin/env bash
-# To use an OpenStack cloud you need to authenticate against the Identity
-# service named keystone...
 export OS_AUTH_URL=http://134.209.71.220/identity
 export OS_PROJECT_ID=9fb84977ff7c4a0baf0d5dbb57e235c7
 export OS_PROJECT_NAME="admin"
@@ -342,69 +331,88 @@ export OS_REGION_NAME="RegionOne"
 export OS_IDENTITY_API_VERSION=3
 ```
 
-This file is the **bridge between the two PCAPs**: it gives the attacker the controller's IP address
-(`134.209.71.220`) and everything they need to authenticate directly to the OpenStack API. Everything
-that happens in the controller PCAP after this moment is a consequence of this download.
+This file is the **bridge between the two PCAPs**: it gives the attacker the controller's direct IP
+address (`134.209.71.220`) and everything needed to authenticate to the OpenStack API without going
+through the web dashboard. Everything that happens in the controller PCAP after this moment is a
+consequence of this one download.
 
 ---
 
 ### Step 6 - Cross-Reference PCAPs: Connect the timeline
 
 This is where the two PCAP files merge into a single story. The question is: _does the activity in
-the web-server PCAP lead to activity in the controller PCAP?_
+the web-server PCAP lead to activity in the controller PCAP, and can we prove it?_
 
-**Method:** Compare timestamps. Open both files and look at when activity ends in one and begins in
-the other.
+**Method:** Compare timestamps. Look at when the last meaningful action occurs in the web-server
+file, then look at when new activity begins in the controller file.
 
-#### 📁 web-server_2025-07-01.pcap - Last meaningful action
+#### 📁 web-server_2025-07-01.pcap: Last meaningful action
 
-The attacker's last request is the OpenRC download at **09:40:29 UTC**.
+The attacker's last request in this file is the OpenRC file download at **09:40:29 UTC**. After
+that there is no more attacker-initiated traffic in the web-server PCAP.
 
-#### 📁 controller_2025-07-01.pcap - First new API activity
+#### 📁 controller_2025-07-01.pcap: What's in this file before the attacker arrives?
 
-Before 09:40:29, the controller PCAP contains API calls triggered by the Horizon dashboard session
-(when you browse the dashboard UI, it makes backend API calls automatically). These are "noise" -
-they happen for any logged-in user.
-
-The first _standalone_ API call - not triggered by the dashboard - is a `GET /identity` at
-**09:41:44 UTC**. This is the OpenStack CLI's initial service discovery request, which happens when
-you run your first `openstack` command after sourcing the RC file.
-
-**The 75-second gap** (09:40:29 to 09:41:44) is the attacker reading the OpenRC file, opening a
-terminal, running `source admin-openrc.sh`, entering the password when prompted, and executing their
-first CLI command. The causal chain is clear.
-
-From this point, everything in `controller_2025-07-01.pcap` is the attacker using the OpenStack CLI
-directly. You can confirm this by checking the User-Agent on these requests - they carry:
+Open the controller PCAP and apply:
 
 ```
-openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5
+http.request && ip.src == 117.200.21.26
 ```
 
-This is the OpenStack Python SDK identifying itself - not a browser, not the Horizon dashboard.
+Before `09:41:44` there are zero results. The attacker has no presence in this file yet.
 
-**Filter (in `controller_2025-07-01.pcap`):**
+Without the filter, the controller PCAP contains only internal background traffic, just the OpenStack
+services talking to each other. You'll see periodic `POST /v3/lease/keepalive` requests from
+`134.209.71.220` to itself on port 2379 (etcd, a key-value store used internally by OpenStack).
+These are automated heartbeats with no relation to the attacker. Everything else is MySQL and AMQP
+traffic between backend services. There is no Horizon dashboard traffic in this file.
+
+#### The pivot moment
+
+The first packet in the controller PCAP with the attacker's IP is at **09:41:44 UTC**:
+
+```
+GET /identity HTTP/1.1
+Host: 134.209.71.220
+User-Agent: openstacksdk/4.6.0 keystoneauth1/5.11.1 python-requests/2.32.4 CPython/3.13.5
+```
+
+This is the OpenStack CLI's initial service discovery call, which is the first thing it does every time you
+run any `openstack` command. The attacker is no longer using a browser. They are now running
+command-line tools directly against the controller using the credentials from the OpenRC file.
+
+**The 75-second gap** between 09:40:29 (OpenRC download) and 09:41:44 (first CLI call) is exactly
+the time it takes to: open a terminal, run `source admin-openrc.sh`, enter the password when
+prompted, and type the first `openstack` command. The causal chain is unambiguous.
+
+#### What the attacker sequence looks like in the controller PCAP
+
+Apply this filter to isolate only the attacker's CLI activity:
 
 ```
 http.request && http.user_agent contains "openstacksdk"
 ```
 
-This isolates direct OpenStack CLI/API activity and avoids mixing in dashboard-generated traffic or
-background keepalive noise. You'll see the full sequence of attacker commands play out:
+The full sequence of commands plays out in order, with timestamps 30–90 seconds apart, at the pace
+of a human exploring an environment manually:
 
-1. Service and endpoint enumeration (`/identity/v3/services`, `/identity/v3/endpoints`)
-2. Individual service detail lookups (`/identity/v3/services/<uuid>` - one per service)
-3. User listing (`/identity/v3/users`)
-4. VM/server listing (`/compute/v2.1/servers/detail`)
-5. Swift container listing (`/v1/AUTH_9fb84977...?format=json`)
-6. Container contents listing (`/v1/AUTH_.../user-data?format=json`, `/v1/AUTH_.../employee-data?format=json`)
-7. File downloads (`user-details.csv`, `employee-details.csv`)
-8. Backdoor user creation (`POST /identity/v3/users`)
-9. Admin role assignment (`PUT /identity/v3/projects/.../users/.../roles/...`)
+| Time (UTC) | Request                                               | What the attacker ran        |
+| ---------- | ----------------------------------------------------- | ---------------------------- |
+| 09:41:44   | `GET /identity`                                       | First CLI command, discovery |
+| 09:41:45   | `POST /identity/v3/auth/tokens`                       | Authentication               |
+| 09:41:45   | `GET /identity/v3/services`                           | List all services            |
+| 09:42:11   | `GET /identity/v3/users`                              | List all users               |
+| 09:42:27   | `GET /compute/v2.1/servers/detail`                    | List VMs                     |
+| 09:43:27   | `GET /v1/AUTH_9fb84977...?format=json`                | List Swift containers        |
+| 09:43:47   | `GET /v1/AUTH_.../user-data?format=json`              | List user-data contents      |
+| 09:44:05   | `GET /v1/AUTH_.../employee-data?format=json`          | List employee-data contents  |
+| 09:45:23   | `GET /v1/AUTH_.../user-data/user-details.csv`         | Download user data           |
+| 09:45:47   | `GET /v1/AUTH_.../employee-data/employee-details.csv` | Download employee data       |
+| 09:48:02   | `POST /identity/v3/users`                             | Create backdoor user         |
+| 09:49:15   | `PUT /identity/v3/projects/.../users/.../roles/...`   | Grant admin role             |
 
-Each of these is a separate `openstack` CLI command the attacker ran, and the timestamps show them
-executing sequentially - about 30–90 seconds apart - as the attacker explored the environment
-manually.
+Each row is a separate `openstack` CLI command. The fact that every request carries the same
+`openstacksdk` User-Agent and the same auth token confirms they all belong to the same session.
 
 ---
 

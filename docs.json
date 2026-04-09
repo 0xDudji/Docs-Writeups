@@ -126,7 +126,8 @@
             "root": "writeups/sherlocks/dfir/index",
             "pages": [
               "writeups/sherlocks/dfir/vantage",
-              "writeups/sherlocks/dfir/brutus"
+              "writeups/sherlocks/dfir/brutus",
+              "writeups/sherlocks/dfir/telly"
             ]
           },
           {

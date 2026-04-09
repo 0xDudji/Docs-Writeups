@@ -1,0 +1,25 @@
+writeup.mdx
+│
+├── # Title - HTB Sherlock Writeup (DFIR / ...)     ← plain H1, no frontmatter heading
+│
+├── ## Challenge Description                         ← blockquote scenario + metadata line
+│
+├── ## Initial Analysis Methodology                  ← the "before questions" section
+│   ├── Intro paragraph (what we have, what we don't know yet)
+│   ├── ### Step N — Name: Question                  ← progressive discovery steps
+│   │   ├── Explanation of what this step tells us
+│   │   ├── Tables / commands / filters
+│   │   └── "What this means" or "Takeaway" prose
+│   └── ### Methodology Summary                      ← numbered list of the repeatable method
+│
+├── ## Attack Timeline                               ← table, comes BEFORE Q&A
+│
+└── ## Questions & Answers                           ← (or "Questions and Answers")
+    └── ### Task N / Q N: Question text
+        ├── **PCAP:** / **Method:** / **Filter:**    ← source + filter lines
+        ├── Explanation prose + code blocks
+        └── > **Answer:** `value`                    ← blockquote answer format
+
+    (optional bonus section after Q&A, e.g. Grok in Brutus)
+
+└── ## Skills Learned                                ← closing bullet list

