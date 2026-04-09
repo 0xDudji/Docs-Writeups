@@ -1,6 +1,6 @@
 # My writeups
 
-Personal security writeups and documentation. Detailed walkthroughs across CTF machines, challenges, and competitions.
+Personal security writeups and documentation. Detailed walkthroughs across CTFs, machines, challenges, and sherlocks.
 
 ## Structure
 
@@ -9,3 +9,4 @@ Personal security writeups and documentation. Detailed walkthroughs across CTF m
 | **Machines**   | CTF machine writeups from HackTheBox and other platforms, organized by season |
 | **Challenges** | Standalone challenge writeups across web, cryptography, and more              |
 | **CTFs**       | Full CTF competition event writeups and solutions                             |
+| **Sherlocks**  | Writeups for investigative challenges                                         |
