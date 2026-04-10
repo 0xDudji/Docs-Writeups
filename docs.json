@@ -126,14 +126,13 @@
             "root": "writeups/sherlocks/dfir/index",
             "pages": [
               "writeups/sherlocks/dfir/vantage",
-              "writeups/sherlocks/dfir/brutus",
-              "writeups/sherlocks/dfir/telly"
+              "writeups/sherlocks/dfir/brutus"
             ]
           },
           {
             "group": "SOC",
             "root": "writeups/sherlocks/soc/index",
-            "pages": []
+            "pages": ["writeups/sherlocks/soc/telly"]
           },
           {
             "group": "Malware Analysis",
