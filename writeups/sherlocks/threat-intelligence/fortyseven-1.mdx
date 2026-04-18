@@ -1,0 +1,401 @@
+# FortySeven-1 - HTB Sherlock Writeup (DFIR / Threat Intelligence)
+
+![FortySeven-1 Banner](/images/sherlocks/fortyseven-1.png)
+
+## Challenge Description
+
+> An APT group is using Hajj-themed phishing lures to target and steal WhatsApp data from
+> government and diplomatic officials. Our team has gathered fragmented intelligence from public
+> cybersecurity vendor reports, blog posts, and internal security alerts. Your task is to build a
+> comprehensive profile of the threat actor responsible. You must connect the dots between different
+> reports to answer questions about their identity, tools, and motives.
+
+**Difficulty:** Very Easy  
+**Category:** DFIR / Threat Intelligence  
+**Evidence Files:**
+
+- Evidence 1 — `https://securelist.com/mysterious-elephant-apt-ttps-and-tools/117596/` (Kaspersky GReAT)
+- Evidence 2 — `https://medium.com/@knownsec404team/apt-k-47-mysterious-elephant-a-new-apt-organization-in-south-asia-5c66f954477` (Knownsec 404 Team)
+- Evidence 3 — `https://medium.com/@knownsec404team/unveiling-the-past-and-present-of-apt-k-47-weapon-asyncshell-5a98f75c2d68` (Knownsec 404 Team)
+
+---
+
+## Initial Analysis Methodology
+
+This Sherlock is different from PCAP or log-based investigations — there are no artifacts to parse
+or packets to follow. Instead, you are given three threat intelligence reports from two vendors
+(Kaspersky and Knownsec 404 Team) and asked to build a profile of a threat actor by reading and
+cross-referencing them.
+
+The methodology here is **source-first, question-second**: rather than jumping straight to the
+tasks, read each report top to bottom first and build a mental map of the actor. Each report covers
+a different time period and angle — Knownsec published first and named the group, while Kaspersky's
+later report covers the evolved 2025 campaign and tooling. Evidence 3 bridges the gap with a
+timeline of a specific weapon's evolution.
+
+---
+
+### Step 1 — Establish Who This Is: Naming and Attribution
+
+The first thing to resolve in any threat intelligence investigation is the naming problem. APT
+groups are often tracked under different names by different vendors simultaneously. This actor is a
+clear example:
+
+| Vendor       | Name Used           |
+| ------------ | ------------------- |
+| Kaspersky    | Mysterious Elephant |
+| Knownsec 404 | APT-K-47            |
+
+Both vendors describe the same group. Knownsec 404 was the first to publish a detailed analysis
+(August 2023) and named the group APT-K-47. Kaspersky independently tracked the same actor,
+naming them Mysterious Elephant. When the Kaspersky Q2 2023 APT trends report mentioned a new
+group targeting Pakistan, Knownsec cross-referenced it against their own findings and confirmed
+the two were the same actor.
+
+The group is presumed to originate in South Asia. Its primary targets are government entities and
+foreign affairs sectors in Pakistan, Bangladesh, Afghanistan, Nepal, and Sri Lanka.
+
+---
+
+### Step 2 — Establish the Timeline: When Did This Start?
+
+Evidence 3 (Asyncshell report) is the clearest source for the group's earliest confirmed activity.
+Knownsec 404 states the group's attack activity dates back to 2022. Evidence 2 corroborates this,
+noting that the earliest ORPCBackdoor samples were compiled in February and March 2022.
+
+The group was not publicly identified until 2023, meaning they operated for approximately a year
+before being discovered.
+
+---
+
+### Step 3 — Map the Toolset: What Do They Use?
+
+The three reports between them describe a fairly large custom toolset. It helps to organise these
+by function:
+
+| Tool                  | Type                     | Source     |
+| --------------------- | ------------------------ | ---------- |
+| ORPCBackdoor          | Backdoor (RPC-based)     | Evidence 2 |
+| Asyncshell (v1–v4)    | Shell backdoor           | Evidence 3 |
+| BabShell              | Reverse shell            | Evidence 1 |
+| MemLoader HidenDesk   | Reflective PE loader     | Evidence 1 |
+| MemLoader Edge        | Loader (VRat)            | Evidence 1 |
+| Uplo Exfiltrator      | Data exfiltration        | Evidence 1 |
+| Stom Exfiltrator      | Data exfiltration        | Evidence 1 |
+| ChromeStealer Exfilt. | Chrome/WhatsApp theft    | Evidence 1 |
+| Vtyrei                | Downloader (early chain) | Evidence 1 |
+
+---
+
+### Step 4 — Understand the Connections: Attribution and Overlap
+
+One of the more challenging aspects of South Asian APT attribution is the significant cross-
+contamination of tools and tactics between groups. The reports consistently note that Mysterious
+Elephant's code overlaps with Confucius, Origami Elephant, SideWinder, and Bitter. The ORPCBackdoor
+in particular was initially attributed to Bitter before Knownsec traced it to a distinct actor.
+
+The link to Bitter is the most significant for this challenge: the ORPCBackdoor was originally
+identified in Bitter's infrastructure, and its CHM delivery chain and code structure are nearly
+identical to Bitter's. This overlap is what connects Mysterious Elephant to the broader South Asian
+APT ecosystem.
+
+---
+
+### Methodology Summary
+
+1. **Identify the actor** — resolve naming differences across vendors before answering anything else
+2. **Anchor the timeline** — find the earliest confirmed activity date across all sources
+3. **Map the toolset** — organise tools by function and source so you can quickly look up details
+4. **Trace the connections** — understand which tools link this actor to other known groups
+5. **Read the malware sections carefully** — specific technical details (export functions, file
+   names, process thresholds, desktop names) are buried in the analysis sections and are easy to
+   miss on a first pass
+
+---
+
+## Attack Timeline
+
+| Period         | Event                                                                                            | Source     |
+| -------------- | ------------------------------------------------------------------------------------------------ | ---------- |
+| Early 2022     | Earliest confirmed attack activity — ORPCBackdoor samples compiled                               | Evidence 2 |
+| 2023           | Group first publicly identified by Kaspersky (Q2 APT report); Knownsec publishes APT-K-47 report | Evidence 2 |
+| September 2023 | Earliest estimated delivery of Asyncshell-v1                                                     | Evidence 3 |
+| January 2024   | Asyncshell-v1 discovered exploiting CVE-2023-38831 in malicious archive                          | Evidence 3 |
+| March 2024     | First observed use of CHM to deliver Asyncshell                                                  | Evidence 3 |
+| April 2024     | Asyncshell-v2 introduced — C2 communication switches from TCP to HTTPS                           | Evidence 3 |
+| July 2024      | Asyncshell-v3 discovered — C2 decrypted from external file                                       | Evidence 3 |
+| Late 2024      | Asyncshell-v4 discovered using Hajj-themed lure; variant base64 and web-service-disguised C2     | Evidence 3 |
+| Early 2025     | Kaspersky documents latest campaign — BabShell, MemLoader, and WhatsApp exfiltration tools       | Evidence 1 |
+
+---
+
+## Questions & Answers
+
+### Task 1: What is the primary name of the APT group described in the SecureList report?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** Title and introduction of the Kaspersky report
+
+The Kaspersky GReAT report is titled "Mysterious Elephant APT: TTPs and tools." The group is
+introduced as a highly active APT discovered by Kaspersky in 2023. The alternate designation
+APT-K-47 comes from Knownsec 404, not Kaspersky — the question specifically asks for the name in
+the SecureList report.
+
+> **Answer:** `Mysterious Elephant`
+
+---
+
+### Task 2: According to the Knownsec 404 team's analysis (Evidence 3), since which year has this group's attack activity been dated back to?
+
+**Source:** Evidence 3 — Knownsec 404 Asyncshell report  
+**Where to look:** Background section (Section 2)
+
+Evidence 3 states: "The organization is presumed to have originated in the South Asian region, and
+its attack activities date back as far as 2022." Evidence 2 further confirms this with sample
+compilation timestamps from February and March 2022.
+
+> **Answer:** `2022`
+
+---
+
+### Task 3: The group uses a custom backdoor that communicates via Office Remote Procedure Call (ORPCBackdoor). According to the Knownsec 404 team's analysis (Evidence 2), what is the name of the first malicious exported entry function?
+
+**Source:** Evidence 2 — Knownsec 404 APT-K-47 report  
+**Where to look:** Section 3 — ORPCBackdoor description
+
+ORPCBackdoor masquerades as a legitimate Windows `version.dll` file and exports 17 functions to
+blend in. Of these, only two are malicious. The report explicitly states: "There are two malicious
+entries of ORPCBackdoor, the first is `GetFileVersionInfoByHandleEx(void)` export function, second
+place is `DllEntryPoint`."
+
+The other 15 export functions are legitimate-looking names lifted from the real `version.dll`
+(e.g. `GetFileVersionInfoA`, `VerQueryValueW`) to avoid suspicion during basic inspection.
+
+> **Answer:** `GetFileVersionInfoByHandleEx(void)`
+
+---
+
+### Task 4: The previously mentioned backdoor checks for a file before creating persistence. What is the name of the file?
+
+**Source:** Evidence 2 — Knownsec 404 APT-K-47 report  
+**Where to look:** Section 3.1.1 — Persistence subsection
+
+Before creating a scheduled persistence task, ORPCBackdoor checks whether `ts.dat` already exists
+in the same path. If it does, the backdoor skips the persistence step to avoid creating duplicate
+scheduled tasks. If it does not, the backdoor creates the task (named "Microsoft Update" via COM
+TaskScheduler) and then creates `ts.dat` as a marker to prevent re-running.
+
+> **Answer:** `ts.dat`
+
+---
+
+### Task 5: The use of the backdoor links the APT to another well-known South Asian APT group. What is the name of this other group?
+
+**Source:** Evidence 2 — Knownsec 404 APT-K-47 report  
+**Where to look:** Section 2 — Homology analysis, and Section 3.1.1 introduction
+
+The homology analysis in Evidence 2 compares the CHM file structure and `doc.htm` code logic
+between Mysterious Elephant and Bitter, finding them "almost the same in terms of code logic,
+functions and evasion techniques." The report notes that the ORPCBackdoor was first found on
+network assets used by the Bitter organisation, and that the two groups share significant
+infrastructure overlap. Kaspersky's Evidence 1 also references "Bitter" as one of the groups whose
+code appears in Mysterious Elephant's malware.
+
+> **Answer:** `Bitter`
+
+---
+
+### Task 6: The APT group we are currently investigating has consistently used and updated another backdoor since 2023, with its C2 communication evolving from TCP to HTTPS. What is the name of this tool?
+
+**Source:** Evidence 3 — Knownsec 404 Asyncshell report  
+**Where to look:** Section 4.3 — The transition from TCP to HTTPS
+
+Evidence 3 documents four versions of Asyncshell. The key transition described in Section 4.3 is
+the shift from TCP to HTTPS C2 communication, which occurred in April 2024 and resulted in the
+version being labelled Asyncshell-v2. The question asks for the name of the tool that underwent
+this evolution — which is Asyncshell-v2 specifically, as that is the version where the TCP-to-HTTPS
+change occurred.
+
+> **Answer:** `Asyncshell-v2`
+
+---
+
+### Task 7: To evade sandbox analysis, the MemLoader HidenDesk tool checks the number of active processes before running. What is the minimum number of processes required for it to proceed?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** Customized open-source tools section — MemLoader HidenDesk
+
+The Kaspersky report describes MemLoader HidenDesk's sandbox evasion technique: "The malware
+checks the number of active processes and terminates itself if there are fewer than 40 processes
+running." The logic is that a real user's machine will have many processes running, while a sandbox
+environment typically runs only a minimal set. If the process count is below the threshold, the
+malware assumes it is being analysed and exits.
+
+> **Answer:** `40`
+
+---
+
+### Task 8: The MemLoader HidenDesk tool creates a covert environment for its activities by creating and switching to a specific environment. What is the name of this hidden desktop?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** Customized open-source tools section — MemLoader HidenDesk, step 3
+
+After passing the process count check, MemLoader HidenDesk creates a hidden Windows desktop object
+and switches to it before executing its payload. The Kaspersky report names this desktop explicitly:
+`MalwareTech_Hidden`. The technique is borrowed from an open-source project on GitHub. By switching
+to a hidden desktop, the malware's activity is invisible to any user watching the screen.
+
+> **Answer:** `MalwareTech_Hidden`
+
+---
+
+### Task 9: The MemLoader HidenDesk tool achieves persistence by placing a shortcut in the autostart folder to ensure it runs after a system reboot. What is the MITRE ATT&CK ID for the 'Registry Run Keys / Startup Folder' technique?
+
+**Source:** Evidence 1 — Kaspersky SecureList / MITRE ATT&CK framework  
+**Where to look:** MemLoader HidenDesk description, step 2
+
+The Kaspersky report confirms that MemLoader HidenDesk "creates a shortcut to its executable and
+saves it in the autostart folder, ensuring it can restart itself after a system reboot." This
+behaviour maps directly to the MITRE ATT&CK technique T1547.001 — Boot or Logon Autostart
+Execution: Registry Run Keys / Startup Folder — which covers adversaries adding entries to startup
+folders to maintain persistence across reboots.
+
+> **Answer:** `T1547.001`
+
+---
+
+### Task 10: The actor uses several custom exfiltration tools targeting WhatsApp. What is the name of the tool that recursively searches specific directories, including the "Desktop" and "Downloads" folders?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** WhatsApp-specific exfiltration tools section — Stom Exfiltrator
+
+The Kaspersky report describes three exfiltration tools. The Stom Exfiltrator is specifically
+described as a tool that "recursively searches specific directories, including the 'Desktop' and
+'Downloads' folders, as well as all drives except the C drive." Its latest variant also targets
+WhatsApp files via a hardcoded AppData path. The other exfiltration tools — Uplo Exfiltrator and
+ChromeStealer Exfiltrator — do not mention Desktop and Downloads folders in the same way.
+
+> **Answer:** `Stom Exfiltrator`
+
+---
+
+### Task 11: Kaspersky's analysis highlights the actor's heavy use of scripts for execution and deploying payloads. What is the MITRE ATT&CK ID for the 'PowerShell' technique?
+
+**Source:** Evidence 1 — Kaspersky SecureList / MITRE ATT&CK framework  
+**Where to look:** PowerShell scripts section
+
+The Kaspersky report dedicates a section to describing how Mysterious Elephant uses PowerShell
+scripts to "execute commands, deploy additional payloads, and establish persistence," including
+scheduling tasks and downloading next-stage payloads via `curl` and `certutil`. This behaviour maps
+to MITRE ATT&CK T1059.001 — Command and Scripting Interpreter: PowerShell.
+
+> **Answer:** `T1059.001`
+
+---
+
+### Task 12: In their early attack chains, Mysterious Elephant used a downloader that was previously associated with the Origami Elephant group. What was the name of this downloader?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** The emergence of Mysterious Elephant section
+
+The Kaspersky report explains that Mysterious Elephant's early attack chains "featured distinctive
+elements, such as remote template injections and exploitation of CVE-2017-11882, followed by the
+use of a downloader called 'Vtyrei', which was previously connected to Origami Elephant and later
+abandoned by this group." Mysterious Elephant adopted Vtyrei after Origami Elephant stopped using
+it, continuing to maintain and develop tools that other groups had abandoned.
+
+> **Answer:** `Vtyrei`
+
+---
+
+### Task 13: In a January 2024 campaign delivering an Asyncshell payload, which CVE was exploited in the malicious archive file?
+
+**Source:** Evidence 3 — Knownsec 404 Asyncshell report  
+**Where to look:** Section 4.1 — Discover Asyncshell for the first time
+
+Evidence 3 documents that when Asyncshell-v1 was first discovered in January 2024, it was
+delivered via "a malicious sample exploiting the CVE-2023-38831 vulnerability." CVE-2023-38831 is
+a vulnerability in WinRAR that allows attackers to execute arbitrary code when a victim opens a
+specially crafted archive. This was an actively exploited vulnerability used by multiple threat
+actors around this period.
+
+> **Answer:** `CVE-2023-38831`
+
+---
+
+### Task 14: What is the MD5 hash of the ChromeStealer Exfiltrator sample named WhatsAppOB.exe?
+
+**Source:** Evidence 1 — Kaspersky SecureList  
+**Where to look:** Indicators of Compromise section — File hashes — ChromeStealer Exfiltrator
+
+The Kaspersky report includes a full indicators of compromise (IoC) section at the end. Under the
+ChromeStealer Exfiltrator heading, one sample is listed with a specific filename:
+
+```
+9e50adb6107067ff0bab73307f5499b6 WhatsAppOB.exe
+```
+
+> **Answer:** `9e50adb6107067ff0bab73307f5499b6`
+
+---
+
+### Task 15: The intelligence describes multiple custom tools designed to upload stolen data to the actor's servers. According to the MITRE ATT&CK framework, what is the ID for the 'Exfiltration Over C2 Channel' technique?
+
+**Source:** Evidence 1 — Kaspersky SecureList / MITRE ATT&CK framework  
+**Where to look:** WhatsApp-specific exfiltration tools section
+
+All three exfiltration tools described by Kaspersky (Uplo Exfiltrator, Stom Exfiltrator,
+ChromeStealer Exfiltrator) upload stolen data directly to the attacker's C2 servers rather than
+using a separate exfiltration channel. This maps to MITRE ATT&CK T1041 — Exfiltration Over C2
+Channel, which covers adversaries stealing data by transmitting it through an existing C2
+communications channel.
+
+> **Answer:** `T1041`
+
+---
+
+## Threat Actor Profile Summary
+
+| Attribute             | Detail                                                                                    |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| Primary name          | Mysterious Elephant                                                                       |
+| Alternate designation | APT-K-47                                                                                  |
+| First identified      | 2023 (Kaspersky Q2 report; Knownsec 404 August 2023)                                      |
+| Earliest activity     | 2022                                                                                      |
+| Presumed origin       | South Asia                                                                                |
+| Primary targets       | Government and diplomatic entities in Pakistan, Bangladesh, Afghanistan, Nepal, Sri Lanka |
+| Initial access        | Spear phishing with CHM, RTF, and malicious archive files                                 |
+| Key themes used       | Hajj, Pakistan UN Security Council bids, civil servant pay                                |
+| Related groups        | Bitter, Confucius, Origami Elephant, SideWinder                                           |
+| Signature backdoors   | ORPCBackdoor, Asyncshell (v1–v4), BabShell                                                |
+| Exfiltration focus    | WhatsApp data, Chrome browser tokens, documents, archives                                 |
+
+---
+
+## MITRE ATT&CK Mapping
+
+| Phase           | Technique ID | Technique Name                                | Evidence                                                       |
+| --------------- | ------------ | --------------------------------------------- | -------------------------------------------------------------- |
+| Initial Access  | T1566.001    | Phishing: Spearphishing Attachment            | CHM, RTF, and archive files delivered via spear phishing       |
+| Execution       | T1059.001    | Command and Scripting Interpreter: PowerShell | PowerShell scripts used throughout attack chains               |
+| Persistence     | T1547.001    | Boot or Logon Autostart: Startup Folder       | MemLoader HidenDesk shortcut in autostart folder               |
+| Defense Evasion | T1574.002    | DLL Side-Loading                              | ORPCBackdoor masquerades as version.dll; loaded via white file |
+| Collection      | T1005        | Data from Local System                        | Exfiltrators recursively search local directories              |
+| Collection      | T1213        | Data from Information Repositories            | WhatsApp application data targeted via hardcoded paths         |
+| Exfiltration    | T1041        | Exfiltration Over C2 Channel                  | All exfiltration tools upload directly to C2 servers           |
+| Exfiltration    | T1048.003    | Exfil Over Unencrypted Non-C2 Protocol        | Asyncshell-v1 used TCP before v2 moved to HTTPS                |
+
+---
+
+## Skills Learned
+
+- Threat intelligence cross-referencing: correlating the same actor across multiple vendor reports
+  that use different naming conventions
+- Understanding APT naming conventions and why the same group is often tracked under multiple names
+  simultaneously
+- Reading malware analysis reports to extract specific technical indicators (file names, export
+  functions, process thresholds, MITRE IDs)
+- Understanding how South Asian APT groups share and recycle tools across related actors
+- Recognising sandbox evasion techniques such as process count checks and hidden desktop creation
+- Mapping observed attacker behaviours to MITRE ATT&CK technique IDs
+- Using IoC sections of threat reports to find file hashes, domains, and infrastructure details

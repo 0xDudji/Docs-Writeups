@@ -140,9 +140,9 @@
             "pages": []
           },
           {
-            "group": "Threat Hunting",
-            "root": "writeups/sherlocks/threat-hunting/index",
-            "pages": []
+            "group": "Threat Intelligence",
+            "root": "writeups/sherlocks/threat-intelligence/index",
+            "pages": ["writeups/sherlocks/threat-intelligence/fortyseven-1"]
           },
           {
             "group": "Cloud",
