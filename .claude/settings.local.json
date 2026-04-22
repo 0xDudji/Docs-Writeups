@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p machines/hackthebox/season-10/interpreter)",
+      "Bash(mkdir -p challenges/overthewire/natas)",
+      "Bash(mkdir -p ctfs)",
+      "Bash(mkdir -p sherlocks/dfir sherlocks/soc sherlocks/threat-intelligence sherlocks/malware-analysis sherlocks/cloud)",
+      "Bash(git mv *)",
+      "Bash(git rm *)"
+    ]
+  }
+}

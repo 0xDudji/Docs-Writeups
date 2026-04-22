@@ -61,28 +61,28 @@
       },
       {
         "tab": "Machines",
-        "url": "writeups/machines/index",
+        "url": "machines/index",
         "groups": [
           {
             "group": "Overview",
-            "pages": ["writeups/machines/index"]
+            "pages": ["machines/index"]
           },
           {
             "group": "HackTheBox",
-            "root": "writeups/machines/hackthebox/index",
+            "root": "machines/hackthebox/index",
             "pages": [
               {
                 "group": "Season 10",
-                "root": "writeups/machines/hackthebox/season-10/index",
+                "root": "machines/hackthebox/season-10/index",
                 "pages": [
                   {
                     "group": "Interpreter",
-                    "root": "writeups/machines/hackthebox/season-10/interpreter",
+                    "root": "machines/hackthebox/season-10/interpreter",
                     "pages": [
-                      "writeups/machines/hackthebox/season-10/interpreter/enumeration",
-                      "writeups/machines/hackthebox/season-10/interpreter/foothold",
-                      "writeups/machines/hackthebox/season-10/interpreter/lateral-movement",
-                      "writeups/machines/hackthebox/season-10/interpreter/privilege-escalation"
+                      "machines/hackthebox/season-10/interpreter/enumeration",
+                      "machines/hackthebox/season-10/interpreter/foothold",
+                      "machines/hackthebox/season-10/interpreter/lateral-movement",
+                      "machines/hackthebox/season-10/interpreter/privilege-escalation"
                     ]
                   }
                 ]
@@ -93,31 +93,31 @@
       },
       {
         "tab": "Challenges",
-        "url": "writeups/challenges/index",
+        "url": "challenges/index",
         "groups": [
           {
             "group": "Overview",
-            "pages": ["writeups/challenges/index"]
+            "pages": ["challenges/index"]
           },
           {
             "group": "OverTheWire",
-            "root": "writeups/challenges/overthewire/index",
+            "root": "challenges/overthewire/index",
             "pages": [
               {
                 "group": "Natas",
-                "root": "writeups/challenges/overthewire/natas/index",
+                "root": "challenges/overthewire/natas/index",
                 "pages": [
-                  "writeups/challenges/overthewire/natas/natas0",
-                  "writeups/challenges/overthewire/natas/natas1",
-                  "writeups/challenges/overthewire/natas/natas2",
-                  "writeups/challenges/overthewire/natas/natas3",
-                  "writeups/challenges/overthewire/natas/natas4",
-                  "writeups/challenges/overthewire/natas/natas5",
-                  "writeups/challenges/overthewire/natas/natas6",
-                  "writeups/challenges/overthewire/natas/natas7",
-                  "writeups/challenges/overthewire/natas/natas8",
-                  "writeups/challenges/overthewire/natas/natas9",
-                  "writeups/challenges/overthewire/natas/natas10"
+                  "challenges/overthewire/natas/natas0",
+                  "challenges/overthewire/natas/natas1",
+                  "challenges/overthewire/natas/natas2",
+                  "challenges/overthewire/natas/natas3",
+                  "challenges/overthewire/natas/natas4",
+                  "challenges/overthewire/natas/natas5",
+                  "challenges/overthewire/natas/natas6",
+                  "challenges/overthewire/natas/natas7",
+                  "challenges/overthewire/natas/natas8",
+                  "challenges/overthewire/natas/natas9",
+                  "challenges/overthewire/natas/natas10"
                 ]
               }
             ]
@@ -126,49 +126,49 @@
       },
       {
         "tab": "CTFs",
-        "url": "writeups/ctfs/index",
+        "url": "ctfs/index",
         "groups": [
           {
             "group": "CTFs",
-            "root": "writeups/ctfs/index",
+            "root": "ctfs/index",
             "pages": []
           }
         ]
       },
       {
         "tab": "Sherlocks",
-        "url": "writeups/sherlocks/index",
+        "url": "sherlocks/index",
         "groups": [
           {
             "group": "Overview",
-            "pages": ["writeups/sherlocks/index"]
+            "pages": ["sherlocks/index"]
           },
           {
             "group": "DFIR",
-            "root": "writeups/sherlocks/dfir/index",
+            "root": "sherlocks/dfir/index",
             "pages": [
-              "writeups/sherlocks/dfir/vantage",
-              "writeups/sherlocks/dfir/brutus"
+              "sherlocks/dfir/vantage",
+              "sherlocks/dfir/brutus"
             ]
           },
           {
             "group": "SOC",
-            "root": "writeups/sherlocks/soc/index",
-            "pages": ["writeups/sherlocks/soc/telly"]
+            "root": "sherlocks/soc/index",
+            "pages": ["sherlocks/soc/telly"]
           },
           {
             "group": "Malware Analysis",
-            "root": "writeups/sherlocks/malware-analysis/index",
+            "root": "sherlocks/malware-analysis/index",
             "pages": []
           },
           {
             "group": "Threat Intelligence",
-            "root": "writeups/sherlocks/threat-intelligence/index",
-            "pages": ["writeups/sherlocks/threat-intelligence/fortyseven-1"]
+            "root": "sherlocks/threat-intelligence/index",
+            "pages": ["sherlocks/threat-intelligence/fortyseven-1"]
           },
           {
             "group": "Cloud",
-            "root": "writeups/sherlocks/cloud/index",
+            "root": "sherlocks/cloud/index",
             "pages": []
           }
         ]
@@ -197,10 +197,10 @@
       {
         "header": "Topics",
         "items": [
-          { "label": "Machines", "href": "/writeups/machines" },
-          { "label": "Sherlocks", "href": "/writeups/sherlocks" },
-          { "label": "Challenges", "href": "/writeups/challenges" },
-          { "label": "CTFs", "href": "/writeups/ctfs" }
+          { "label": "Machines", "href": "/machines" },
+          { "label": "Sherlocks", "href": "/sherlocks" },
+          { "label": "Challenges", "href": "/challenges" },
+          { "label": "CTFs", "href": "/ctfs" }
         ]
       }
     ],
