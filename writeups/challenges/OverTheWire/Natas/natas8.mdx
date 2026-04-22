@@ -1,0 +1,97 @@
+---
+title: "Natas 8"
+description: "Natas Level 8 — reversing a multi-step encoding chain to recover the secret."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas8.natas.labs.overthewire.org`   |
+| Username | `natas8`                                     |
+| Password | `xcoXLmzMkoIP9D7hlgPlh9XD7OgLAe5Q`          |
+
+Another *"Input secret"* form. The *"View sourcecode"* link reveals the PHP — including the encoded secret and the function used to encode it.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — Read the encoding function">
+    The source shows `$encodedSecret` (the target value) and the `encodeSecret()` function that transforms input before comparison. Read the function carefully — what three operations does it apply, and in what order?
+
+    ```php
+    function encodeSecret($secret) {
+        return bin2hex(strrev(base64_encode($secret)));
+    }
+    ```
+  </Accordion>
+  <Accordion title="Hint 2 — Reverse the chain">
+    The encoding order is: `base64_encode` → `strrev` → `bin2hex`. To recover the original secret, apply the inverse operations in reverse order:
+
+    1. Hex decode the stored value
+    2. Reverse the resulting string
+    3. Base64 decode
+
+    A tool like [CyberChef](https://gchq.github.io/CyberChef/) lets you chain these operations visually.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Start with the encoded secret">
+      ```
+      3d3d516343746d4d6d6c315669563362
+      ```
+    </Step>
+    <Step title="Step 1 — Hex decode">
+      Decode the hex string:
+
+      ```
+      ==QcCtmMml1ViV3b
+      ```
+
+      The `==` at the start is a giveaway that this is a reversed Base64 string (padding normally appears at the end).
+    </Step>
+    <Step title="Step 2 — Reverse the string">
+      Reverse `==QcCtmMml1ViV3b`:
+
+      ```
+      b3ViV1lmMmtCcQ==
+      ```
+    </Step>
+    <Step title="Step 3 — Base64 decode">
+      Decode `b3ViV1lmMmtCcQ==`:
+
+      ```
+      oubWYf2kBq
+      ```
+
+      This is the secret.
+    </Step>
+    <Step title="Submit">
+      Enter `oubWYf2kBq` in the form and submit.
+    </Step>
+  </Steps>
+</Accordion>
+
+## With curl
+
+```bash
+# POST the decoded secret directly to the form
+curl -s -u natas8:xcoXLmzMkoIP9D7hlgPlh9XD7OgLAe5Q \
+  -X POST -d "secret=oubWYf2kBq&submit=1" \
+  http://natas8.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas9: ZE1ck82lmdGIoErlhQgWND6j2Wzz6b6t
+```

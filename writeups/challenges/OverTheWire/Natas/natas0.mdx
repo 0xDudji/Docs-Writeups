@@ -1,0 +1,62 @@
+---
+title: "Natas 0"
+description: "Natas Level 0 — password hidden in an HTML comment in the page source."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas0.natas.labs.overthewire.org`   |
+| Username | `natas0`                                     |
+| Password | `natas0`                                     |
+
+You land on a page that says: *"You can find the password for the next level on this page."*
+
+Nothing is visibly shown — but that statement is literally true. The password exists somewhere in what the server sent back. The browser renders HTML visually, but there's always more to a page than what appears on screen.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What else is in a web page?">
+    Browsers parse HTML and render the visible parts. But HTML can contain elements that are never displayed — comments, hidden elements, metadata. Is there anything in this page's source that the browser isn't showing you?
+  </Accordion>
+  <Accordion title="Hint 2 — How do you see the raw source?">
+    Every browser lets you view the raw HTML sent by the server. Try pressing `Ctrl+U` or looking in the browser's View menu. Search the source for the word "password".
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="View the page source">
+      Press `Ctrl+U` to open the raw HTML source in a new tab.
+    </Step>
+    <Step title="Find the HTML comment">
+      Inside `<div id="content">`, there is an HTML comment that is never rendered by the browser:
+
+      ```html
+      <!--The password for natas1 is 0nzCigAq7t2iALyvU9xcHlYN4MlkIwlq -->
+      ```
+    </Step>
+  </Steps>
+</Accordion>
+
+## With curl
+
+```bash
+curl -s -u natas0:natas0 \
+  http://natas0.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas1: 0nzCigAq7t2iALyvU9xcHlYN4MlkIwlq
+```

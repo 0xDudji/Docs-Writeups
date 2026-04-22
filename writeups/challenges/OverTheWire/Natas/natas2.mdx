@@ -1,0 +1,81 @@
+---
+title: "Natas 2"
+description: "Natas Level 2 — a world-readable files directory exposes a credentials file."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas2.natas.labs.overthewire.org`   |
+| Username | `natas2`                                     |
+| Password | `TguMNxKo1DSa1tujBLuZJnDUlCcUAPlI`          |
+
+The page says: *"There is nothing on this page."*
+
+There are no HTML comments this time. But "nothing on this page" doesn't mean the server has nothing to offer — it means the visible content is empty. Start by examining what resources the page is actually loading.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What does the source load?">
+    View the page source. Even though the page appears blank, it still loads assets. Is anything referenced that lives in a subdirectory on the server?
+  </Accordion>
+  <Accordion title="Hint 2 — Directory listing">
+    The source loads `files/pixel.png`. The `/files/` directory exists on the server. Many web servers are configured to show a listing of all files in a directory when no `index.html` is present. Try navigating directly to `/files/` — you might see more than just `pixel.png`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Inspect the page source">
+      View source. The page body contains:
+
+      ```html
+      <img src="files/pixel.png">
+      ```
+
+      This reveals the existence of a `/files/` directory.
+    </Step>
+    <Step title="Browse to the directory">
+      Navigate to `http://natas2.natas.labs.overthewire.org/files/`.
+
+      Apache directory listing is enabled, showing two files:
+      - `pixel.png` — a 1×1 placeholder image
+      - `users.txt` — a credentials file
+    </Step>
+    <Step title="Read users.txt">
+      Open `users.txt`:
+
+      ```
+      # username:password
+      alice:BYNdCesZqW
+      bob:jw2ueICLvT
+      charlie:G5vCxkVV3m
+      natas3:3gqisGdR0pjm6tpkDKdIWO2hSvchLeYH
+      eve:zo4mJWyNj2
+      mallory:9urtcpzBmH
+      ```
+    </Step>
+  </Steps>
+</Accordion>
+
+## With curl
+
+```bash
+# Fetch the exposed credentials file directly
+curl -s -u natas2:TguMNxKo1DSa1tujBLuZJnDUlCcUAPlI \
+  http://natas2.natas.labs.overthewire.org/files/users.txt
+```
+
+## Password
+
+```
+natas3: 3gqisGdR0pjm6tpkDKdIWO2hSvchLeYH
+```

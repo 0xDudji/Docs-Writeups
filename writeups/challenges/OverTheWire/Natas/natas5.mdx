@@ -1,0 +1,75 @@
+---
+title: "Natas 5"
+description: "Natas Level 5 — session state stored in a plaintext client-side cookie, trivially forged."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas5.natas.labs.overthewire.org`   |
+| Username | `natas5`                                     |
+| Password | `0n35PkggAPm2zbEpOU802c0x0Msn1ToK`          |
+
+The page says: *"Access disallowed. You are not logged in."*
+
+No login form is present. The server already knows you're not logged in — which means it's reading that state from somewhere in your request. Think about how web applications persist state between requests.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — How does the server know your login state?">
+    HTTP is stateless — every request starts fresh. Web applications use cookies to persist state across requests. Open your browser's DevTools (F12 → Application → Cookies) or intercept the request in Burp. Is there a cookie that relates to being logged in?
+  </Accordion>
+  <Accordion title="Hint 2 — Can you change the cookie value?">
+    You should see a cookie called `loggedin` with a value of `0`. This boolean flag is stored entirely on the client side with no server-side verification. Modify it to `1` and resend the request — either through Burp Suite or your browser's DevTools cookie editor.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Inspect the cookie">
+      Intercept the request in Burp Suite (or open DevTools → Application → Cookies). You will see:
+
+      ```
+      Cookie: loggedin=0
+      ```
+    </Step>
+    <Step title="Modify the cookie">
+      Change the value to:
+
+      ```
+      Cookie: loggedin=1
+      ```
+    </Step>
+    <Step title="Resend the request">
+      Forward the modified request. The server trusts the cookie value and grants access, returning the password.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  Authorization state must never be stored in an unprotected client-side cookie. A client can set any cookie value they want. Proper session management uses a server-side session store keyed by an unpredictable session token — the server holds the truth about who is logged in, not the client.
+</Note>
+
+## With curl
+
+```bash
+# --cookie sets a cookie in the request — no browser needed
+curl -s -u natas5:0n35PkggAPm2zbEpOU802c0x0Msn1ToK \
+  --cookie "loggedin=1" \
+  http://natas5.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas6: 0RoJwHdSKWFTYR5WuiAewauSuNaBXned
+```

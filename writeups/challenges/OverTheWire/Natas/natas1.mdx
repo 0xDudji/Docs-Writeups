@@ -1,0 +1,72 @@
+---
+title: "Natas 1"
+description: "Natas Level 1 — right-click is blocked via JavaScript, but keyboard shortcuts bypass it entirely."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas1.natas.labs.overthewire.org`   |
+| Username | `natas1`                                     |
+| Password | `0nzCigAq7t2iALyvU9xcHlYN4MlkIwlq`          |
+
+The page says: *"You can find the password for the next level on this page, but rightclicking has been blocked!"*
+
+The source contains this handler:
+
+```html
+<body oncontextmenu="javascript:alert('right clicking has been blocked!'); return false;">
+```
+
+The password is still in the source — same as Level 0. The only obstacle is accessing that source without right-clicking.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What is actually being blocked?">
+    Only the right-click context menu is blocked — and only by JavaScript running inside the browser. JavaScript can block the context menu event, but it cannot block your browser's own built-in features. What other methods does your browser offer to view source?
+  </Accordion>
+  <Accordion title="Hint 2 — Browser keyboard shortcuts">
+    Most browsers have a keyboard shortcut to view the page source that has nothing to do with right-clicking. Try `Ctrl+U`. You can also use the browser address bar directly by typing `view-source:` before the URL.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Bypass the right-click block">
+      Press `Ctrl+U` to open the page source directly — the JavaScript block on right-click doesn't affect this shortcut. Alternatively, type `view-source:http://natas1.natas.labs.overthewire.org` in the address bar.
+    </Step>
+    <Step title="Find the HTML comment">
+      The password sits in the same HTML comment pattern as Level 0:
+
+      ```html
+      <!--The password for natas2 is TguMNxKo1DSa1tujBLuZJnDUlCcUAPlI -->
+      ```
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  Client-side restrictions (JavaScript handlers, CSS tricks) are never a real security boundary. They only affect users who run your JavaScript. Any HTTP client, curl, or browser shortcut bypasses them entirely.
+</Note>
+
+## With curl
+
+```bash
+curl -s -u natas1:0nzCigAq7t2iALyvU9xcHlYN4MlkIwlq \
+  http://natas1.natas.labs.overthewire.org/ \
+  | grep -i password
+```
+
+## Password
+
+```
+natas2: TguMNxKo1DSa1tujBLuZJnDUlCcUAPlI
+```

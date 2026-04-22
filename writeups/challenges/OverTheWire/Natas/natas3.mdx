@@ -1,0 +1,86 @@
+---
+title: "Natas 3"
+description: "Natas Level 3 — a disallowed path in robots.txt reveals a hidden directory."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas3.natas.labs.overthewire.org`   |
+| Username | `natas3`                                     |
+| Password | `3gqisGdR0pjm6tpkDKdIWO2hSvchLeYH`          |
+
+The page says: *"There is nothing on this page."* The source is also clean — no referenced files this time.
+
+There is, however, a comment in the source:
+
+```html
+<!-- No more information leaks!! Not even Google will find it this time... -->
+```
+
+*"Not even Google"* is the key phrase here.
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — How does Google find pages?">
+    Search engine crawlers discover pages by following links. Website owners can instruct crawlers to skip certain paths using a well-known standard file in the web root. What is that file called, and what does it contain?
+  </Accordion>
+  <Accordion title="Hint 2 — What's in robots.txt?">
+    Navigate to `/robots.txt`. The file uses `Disallow:` directives to tell crawlers which paths to avoid. These paths are hidden from search engines — but not from you. Whatever is listed there is worth visiting.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Read robots.txt">
+      Navigate to `http://natas3.natas.labs.overthewire.org/robots.txt`:
+
+      ```
+      User-agent: *
+      Disallow: /s3cr3t/
+      ```
+    </Step>
+    <Step title="Browse the disallowed directory">
+      Navigate to `http://natas3.natas.labs.overthewire.org/s3cr3t/`.
+
+      Directory listing is enabled, exposing `users.txt`.
+    </Step>
+    <Step title="Read users.txt">
+      Open `users.txt` to retrieve the password:
+
+      ```
+      natas4:QryZXc2e0zahULdHrtHxzyYkj59kUxLQ
+      ```
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  `robots.txt` is publicly readable by design — it's meant for crawlers, but any human can open it. Listing a sensitive path under `Disallow` only hides it from polite bots; it advertises it to anyone looking for hidden endpoints.
+</Note>
+
+## With curl
+
+```bash
+# Read robots.txt to find the hidden path
+curl -s -u natas3:3gqisGdR0pjm6tpkDKdIWO2hSvchLeYH \
+  http://natas3.natas.labs.overthewire.org/robots.txt
+
+# Read the disallowed directory's credentials file
+curl -s -u natas3:3gqisGdR0pjm6tpkDKdIWO2hSvchLeYH \
+  http://natas3.natas.labs.overthewire.org/s3cr3t/users.txt
+```
+
+## Password
+
+```
+natas4: QryZXc2e0zahULdHrtHxzyYkj59kUxLQ
+```

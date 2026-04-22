@@ -96,9 +96,31 @@
         "url": "writeups/challenges/index",
         "groups": [
           {
-            "group": "Challenges",
-            "root": "writeups/challenges/index",
-            "pages": []
+            "group": "Overview",
+            "pages": ["writeups/challenges/index"]
+          },
+          {
+            "group": "OverTheWire",
+            "root": "writeups/challenges/overthewire/index",
+            "pages": [
+              {
+                "group": "Natas",
+                "root": "writeups/challenges/overthewire/natas/index",
+                "pages": [
+                  "writeups/challenges/overthewire/natas/natas0",
+                  "writeups/challenges/overthewire/natas/natas1",
+                  "writeups/challenges/overthewire/natas/natas2",
+                  "writeups/challenges/overthewire/natas/natas3",
+                  "writeups/challenges/overthewire/natas/natas4",
+                  "writeups/challenges/overthewire/natas/natas5",
+                  "writeups/challenges/overthewire/natas/natas6",
+                  "writeups/challenges/overthewire/natas/natas7",
+                  "writeups/challenges/overthewire/natas/natas8",
+                  "writeups/challenges/overthewire/natas/natas9",
+                  "writeups/challenges/overthewire/natas/natas10"
+                ]
+              }
+            ]
           }
         ]
       },

