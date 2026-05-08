@@ -1,0 +1,932 @@
+# PhishNet - HTB Sherlock Writeup (DFIR / Email Forensics)
+
+![PhishNet Banner](/images/sherlocks/phisnet.png)
+
+## Challenge Description
+
+> An accounting team receives an urgent payment request from a known vendor. The email appears
+> legitimate but contains a suspicious link and a .zip attachment hiding malware. Your task is to
+> analyze the email headers, and uncover the attacker's scheme.
+
+**Difficulty:** Very Easy  
+**Category:** DFIR / Email Forensics  
+**Evidence File:** `email.eml` — SHA-256: `cf48f767176524f8c3fce171607b846aae463cc6128a48de32dffe2da6ab37c4`
+
+---
+
+## Initial Analysis Methodology
+
+Before diving into the questions, the goal is to understand what we are looking at and build a
+repeatable approach to email forensics. This is a different discipline from PCAP or log analysis
+— instead of Wireshark, your primary tool is a text editor and the command line.
+
+---
+
+### Step 1 — Understand the Artifact: What is an .eml file?
+
+An `.eml` file is a standard format for storing complete email messages as plain text. It
+contains everything about an email in a single file: the headers at the top, the body in the
+middle, and any attachments at the bottom (encoded as Base64 text). Because it is just text, you
+can open it in any editor — VS Code, Sublime Text, or even `cat` on the terminal.
+
+Start by confirming what you have:
+
+```bash
+file email.eml
+# email.eml: SMTP mail, ASCII text, with CRLF line terminators
+```
+
+Then do a quick read-through to get oriented:
+
+```bash
+cat email.eml
+```
+
+The output will look like this — first all the headers, then a blank line, then the HTML body,
+then the attachment:
+
+```
+Return-Path: <finance@business-finance.com>
+Reply-To: <support@business-finance.com>
+X-Mailer: Microsoft Outlook 16.0
+X-Originating-IP: [45.67.89.10]
+X-Priority: 1 (Highest)
+X-MSMail-Priority: High
+Received-SPF: Pass (protection.outlook.com: domain of business-finance.com ...)
+...
+From: "Finance Dept" <finance@business-finance.com>
+To: "Accounting Dept" <accounts@globalaccounting.com>
+Subject: Urgent: Invoice Payment Required - Overdue Notice
+...
+
+<html>
+  <body>
+    <p>Dear Accounting Team,</p>
+    ...
+    <a href="https://secure.business-finance.com/invoice/...">Download Invoice</a>
+    ...
+  </body>
+</html>
+
+--boundary123
+Content-Type: application/zip; name="Invoice_2025_Payment.zip"
+Content-Disposition: attachment; filename="Invoice_2025_Payment.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIABh/WloXPY4qcxITALvMGQAY...
+```
+
+This gives you an immediate overview of the full email before you start answering questions.
+
+---
+
+### Step 2 — Understand the Structure: Headers, Body, and Attachments
+
+An email has three distinct sections, each separated by blank lines:
+
+**Headers (lines 1–34):** Metadata about the email — who sent it, where it came from, what
+servers handled it, and authentication results. These are the most forensically valuable part.
+Every header is a `Key: Value` pair.
+
+**Body (after the first blank line):** The actual content shown to the recipient. In this email
+it is HTML (`Content-Type: text/html`), meaning it has formatting, links, and can hide the real
+destination of any hyperlink behind display text.
+
+**Attachments (after `--boundary123` separator):** The ZIP file is encoded as Base64 text and
+embedded inline at the end of the file. The `boundary123` string acts as a divider between the
+body and each attachment.
+
+---
+
+### Step 3 — Read Every Header: A Complete Reference
+
+This is the full header block from `email.eml`, line by line:
+
+```
+Return-Path: <finance@business-finance.com>
+Reply-To: <support@business-finance.com>
+X-Mailer: Microsoft Outlook 16.0
+X-Originating-IP: [45.67.89.10]
+X-Priority: 1 (Highest)
+X-MSMail-Priority: High
+Received-SPF: Pass (protection.outlook.com: domain of business-finance.com
+              designates 45.67.89.10 as permitted sender)
+ARC-Seal: i=1; a=rsa-sha256; d=business-finance.com; s=arc-2025; t=1677416100; cv=pass;
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=business-finance.com; s=arc-2025;
+X-AntiSpam: Passed
+X-Organization: Business Finance Ltd.
+X-Envelope-From: finance@business-finance.com
+List-Unsubscribe: <mailto:unsubscribe@business-finance.com>
+X-Sender-IP: 45.67.89.10
+Received: from mail.business-finance.com ([203.0.113.25])
+    by mail.target.com (Postfix) with ESMTP id ABC123;
+    Mon, 26 Feb 2025 10:15:00 +0000 (UTC)
+Received: from relay.business-finance.com ([198.51.100.45])
+    by mail.business-finance.com with ESMTP id DEF456;
+    Mon, 26 Feb 2025 10:10:00 +0000 (UTC)
+Received: from finance@business-finance.com ([198.51.100.75])
+    by relay.business-finance.com with ESMTP id GHI789;
+    Mon, 26 Feb 2025 10:05:00 +0000 (UTC)
+Authentication-Results: spf=pass (domain business-finance.com designates 45.67.89.10 as permitted sender)
+     smtp.mailfrom=business-finance.com;
+     dkim=pass header.d=business-finance.com;
+     dmarc=pass action=none header.from=business-finance.com;
+Message-ID: <20250226101500.ABC123@business-finance.com>
+Date: Mon, 26 Feb 2025 10:15:00 +0000 (UTC)
+From: "Finance Dept" <finance@business-finance.com>
+To: "Accounting Dept" <accounts@globalaccounting.com>
+Subject: Urgent: Invoice Payment Required - Overdue Notice
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary123"
+```
+
+Here is what every single header means:
+
+**`Return-Path: <finance@business-finance.com>`**
+The envelope sender — the address that bounce messages (delivery failures) are sent back to. Set
+by the sending mail server automatically. If the email cannot be delivered, the bounce goes here.
+It often matches the `From` address but does not have to.
+
+**`Reply-To: <support@business-finance.com>`**
+When the recipient clicks "Reply", their email client pre-fills this address instead of the
+`From` address. Phishing emails sometimes use this to redirect replies to a different mailbox
+than where the email appeared to come from. Here both are on the same domain, but in other
+attacks the `Reply-To` might point to a completely different domain.
+
+**`X-Mailer: Microsoft Outlook 16.0`**
+The email client or software that was used to compose and send the email. This is self-reported
+by the sender — it can be faked trivially. Its value here is context: if the rest of the
+infrastructure looks like a Linux mail server but the mailer says Outlook, that inconsistency is
+worth noting.
+
+**`X-Originating-IP: [45.67.89.10]`**
+A non-standard header (the `X-` prefix means custom/extended) added by some mail servers to
+record the IP address the email was originally submitted from — the sender's actual machine or
+mail client. This is one of the most forensically useful headers when it is present, as it
+records the real origin before any relay.
+
+**`X-Priority: 1 (Highest)` and `X-MSMail-Priority: High`**
+These headers flag the email as high priority, causing email clients to display it prominently —
+often with a red exclamation mark. Phishing emails use this to create urgency and pressure the
+recipient into acting quickly without thinking carefully.
+
+**`Received-SPF: Pass (...)`**
+A header added by the receiving mail server recording the result of its own SPF check (explained
+in full detail in Q5). This is distinct from the `Authentication-Results` header — `Received-SPF`
+is the raw result logged by the mail server at the point of delivery, while `Authentication-Results`
+is a structured summary of all authentication checks.
+
+**`ARC-Seal` and `ARC-Message-Signature`**
+ARC (Authenticated Received Chain) solves a specific problem: when an email is forwarded through
+a mailing list or another relay, the forwarding server re-sends it from a different IP — which
+breaks SPF — and may modify the headers — which breaks DKIM. ARC lets each relay in the chain
+record and sign the authentication state it observed, so the final receiving server can see the
+full history even if the original signatures no longer validate.
+
+Think of it as a chain of notarized handoffs: each server stamps "I received this email and at
+that point SPF/DKIM were passing" and signs that stamp. ARC-Message-Signature covers the message
+headers, and ARC-Seal covers the ARC headers themselves (to prevent tampering with the chain).
+
+In this email both show `cv=pass`, meaning the chain is intact. However, because the attacker
+owns `business-finance.com` and its cryptographic keys, they can produce valid ARC signatures
+just as easily as valid DKIM signatures (explained in full in Q5). These headers do not add any
+legitimacy here — they just mean the attacker set up their domain correctly.
+
+**`X-AntiSpam: Passed`** _(added by the receiving mail server — not set by the sender)_
+This header is added by the victim's mail infrastructure after the email arrives, not by the
+attacker. The receiving spam filter runs its checks and then stamps the result onto the email
+before delivering it to the inbox. The attacker has no control over what value appears here —
+they cannot set `X-AntiSpam: Passed` themselves.
+
+In this case it shows `Passed` because the attacker's domain passes SPF, DKIM, and DMARC, and
+the email body is carefully written to avoid obvious spam trigger words. The spam filter was
+fooled — not bypassed. This header tells you what the filter decided; it says nothing about
+whether the email is actually safe.
+
+This is an important distinction to understand: `Received`, `Received-SPF`, `X-AntiSpam`, and
+`Authentication-Results` are all added by mail servers in the delivery chain — the attacker
+cannot fake them in a way that the receiving server would trust. Everything with an `X-` prefix
+that appears _before_ the email reaches the victim (like `X-Originating-IP`, `X-Organization`,
+`X-Mailer`) is set by the sender and is fully controllable by the attacker.
+
+**`X-Organization: Business Finance Ltd.`**
+A custom header the sender added to associate the email with a company name. This is completely
+self-reported and carries no verification. Attackers add it to reinforce the fake identity.
+
+**`X-Envelope-From: finance@business-finance.com`**
+This records the SMTP envelope sender — the address passed to the mail server at the protocol
+level using the `MAIL FROM:` command, before any message content is transmitted. It is distinct
+from the `From` header, which is part of the message content and is what the recipient's email
+client displays.
+
+These three addresses are related but separate things:
+
+| Field             | Value here                     | What it controls                              |
+| ----------------- | ------------------------------ | --------------------------------------------- |
+| `X-Envelope-From` | `finance@business-finance.com` | SMTP `MAIL FROM` — where bounces go           |
+| `Return-Path`     | `finance@business-finance.com` | Same as envelope sender, recorded by receiver |
+| `From` (header)   | `finance@business-finance.com` | What the recipient sees in their inbox        |
+
+Here all three match, which is consistent and expected for a legitimate-looking email. But in
+many phishing and spoofing attacks, these deliberately differ — and that mismatch is a red flag.
+
+**What misalignment looks like and why it is suspicious:**
+
+A classic spoofing scenario where someone pretends to be `ceo@bigcompany.com` while actually
+controlling only `attacker.com` would produce something like this:
+
+```
+X-Envelope-From: bounce@attacker.com      ← real sender, used for bounces
+Return-Path: bounce@attacker.com          ← same — where failures go
+From: "CEO Big Company" <ceo@bigcompany.com>  ← spoofed display address
+```
+
+The recipient sees `ceo@bigcompany.com` in their inbox, but the actual sending infrastructure
+belongs to `attacker.com`. SPF would fail here because `attacker.com` is not in `bigcompany.com`'s
+SPF record — and this is exactly what SPF is designed to catch. DMARC would also fail because
+the `From` domain (`bigcompany.com`) does not align with the authenticated domain (`attacker.com`).
+
+In this PhishNet email there is no misalignment — not because the email is legitimate, but
+because the attacker owns `business-finance.com` entirely and has set all three addresses to be
+consistent. The attack vector is domain impersonation, not domain spoofing.
+
+**`List-Unsubscribe: <mailto:unsubscribe@business-finance.com>`**
+Normally used by mailing lists to let recipients unsubscribe. Its presence here is part of the
+legitimacy theatre — real mass-mail platforms include this header, so attackers add it to make
+the email look like it came from a professional system rather than a one-off phishing tool.
+
+**`X-Sender-IP: 45.67.89.10`**
+Redundant with `X-Originating-IP` — another custom header recording the sender's IP. Some mail
+platforms add both. Both point to the same IP, confirming it as the origin.
+
+**`Received` headers (three of them)**
+Each `Received` header records one hop — one mail server that handled the email. Read them from
+bottom to top to trace the journey from origin to destination. Full analysis in Q2.
+
+**`Authentication-Results`**
+A structured summary of SPF, DKIM, and DMARC checks performed by the receiving mail server.
+Each sub-result is on its own line. Full explanation of each protocol in Q5.
+
+**`Message-ID: <20250226101500.ABC123@business-finance.com>`**
+A unique identifier assigned to this specific email by the sending mail server. It is used for
+threading (linking replies to original messages) and for deduplication. The format is typically
+`timestamp.random@domain`. In a real investigation, the Message-ID can help correlate emails
+across different log sources.
+
+**`Date: Mon, 26 Feb 2025 10:15:00 +0000 (UTC)`**
+The timestamp the sender's mail client recorded when the email was composed. This is self-reported
+and can be set to any value — it does not necessarily match when the email was actually
+transmitted. Compare against `Received` header timestamps to spot inconsistencies.
+
+**`From: "Finance Dept" <finance@business-finance.com>`**
+The display name and address shown to the recipient. Email clients typically show only the display
+name (`Finance Dept`) in the inbox view. The actual address (`finance@business-finance.com`) is
+hidden behind it. Always expand this field to see the real address, not just the display name.
+
+**`To: "Accounting Dept" <accounts@globalaccounting.com>`**
+The intended recipient. The display name (`Accounting Dept`) and address
+(`accounts@globalaccounting.com`) are the target of this phishing attempt.
+
+**`Subject: Urgent: Invoice Payment Required - Overdue Notice`**
+The email subject line. The word "Urgent" is deliberate — it is a classic social engineering
+trigger. Combined with the high priority flags, the goal is to bypass careful thinking by making
+the recipient feel they must act immediately.
+
+**`MIME-Version: 1.0`**
+MIME (Multipurpose Internet Mail Extensions) is the standard that allows email to carry
+non-text content like HTML bodies and attachments. Version 1.0 is the only version in use.
+This header just declares that the email uses MIME formatting.
+
+**`Content-Type: multipart/mixed; boundary="boundary123"`**
+Declares that the email has multiple parts — in this case, the HTML body and the ZIP attachment.
+The `boundary` string (`boundary123`) is used as a divider between each part. Wherever
+`--boundary123` appears in the file, it marks the start of a new section.
+
+---
+
+### Step 4 — Read the Body: Find Hidden Links
+
+The body is HTML. In a text editor, scroll past the headers to find the `<a href>` tag:
+
+```bash
+grep -a "href" email.eml
+```
+
+Output:
+
+```
+<a href="https://secure.business-finance.com/invoice/details/view/INV2025-0987/payment">Download Invoice</a>
+<a href='mailto:support@business-finance.com'>support@business-finance.com</a>
+```
+
+The first link is the phishing URL. The display text says `Download Invoice` — but the actual
+destination is `secure.business-finance.com`, a domain controlled by the attacker. A recipient
+reading the rendered email would see a blue hyperlink that says "Download Invoice" with no hint
+of where it actually goes.
+
+---
+
+### Step 5 — Extract the Attachment: Command Line Approach
+
+The attachment is Base64-encoded inside the `.eml` file. You can extract it without needing an
+email client at all.
+
+**The easy way — use Python's email library:**
+
+Python has a built-in library that understands `.eml` format natively and handles all the
+parsing for you:
+
+```bash
+python3 << 'EOF'
+import email
+
+with open('email.eml', 'rb') as f:
+    msg = email.message_from_bytes(f.read())
+
+for part in msg.walk():
+    if part.get_content_disposition() == 'attachment':
+        filename = part.get_filename()
+        data = part.get_payload(decode=True)
+        with open(filename, 'wb') as f:
+            f.write(data)
+        print(f"Saved: {filename} ({len(data)} bytes)")
+EOF
+```
+
+Output:
+
+```
+Saved: Invoice_2025_Payment.zip (75 bytes)
+```
+
+This approach is the cleanest — `email.message_from_bytes()` handles all MIME parsing, boundary
+detection, and Base64 decoding automatically. `get_payload(decode=True)` decodes the Base64
+content and gives you the raw bytes of the file.
+
+**The manual way — understand what is happening under the hood:**
+
+If you want to understand the mechanics, the Base64 block is visible in the raw `.eml` file.
+After the `Content-Transfer-Encoding: base64` header, everything until the next `--boundary123`
+is the encoded ZIP:
+
+```bash
+# See where the attachment data starts
+grep -n "Content-Transfer-Encoding: base64" email.eml
+# Line 47: Content-Transfer-Encoding: base64
+
+# The Base64 data is on the next line — print it
+sed -n '49p' email.eml
+# UEsDBBQAAAAIABh/WloXPY4qcxITALvMGQAYAAAAaW52b2...
+
+# Decode it manually
+sed -n '49p' email.eml | base64 -d > Invoice_2025_Payment.zip
+```
+
+Both approaches produce the same file. The easy way is faster; the manual way shows you exactly
+what Base64 encoding looks like in a real email.
+
+**Step 3 — Hash the extracted file:**
+
+```bash
+# Linux
+sha256sum Invoice_2025_Payment.zip
+# 8379c41239e9af845b2ab6c27a7509ae8804d7d73e455c800a551b22ba25bb4a  Invoice_2025_Payment.zip
+
+# Windows PowerShell
+Get-FileHash -Algorithm SHA256 .\Invoice_2025_Payment.zip
+# SHA256  8379C41239E9AF845B2AB6C27A7509AE8804D7D73E455C800A551B22BA25BB4A
+```
+
+This hash can be submitted to VirusTotal (`virustotal.com`) or any threat intelligence platform
+to check whether this sample is already known and documented.
+
+**Step 4 — Inspect archive contents:**
+
+```bash
+python3 -c "import zipfile; z=zipfile.ZipFile('Invoice_2025_Payment.zip'); print(z.namelist())"
+```
+
+Inside, one file is listed: `invoice_document.pdf.bat`.
+
+---
+
+### Methodology Summary
+
+1. **`file email.eml`** — confirm the artifact type
+2. **`cat email.eml`** — read the full raw file to get oriented
+3. **Read every header** — understand what each one says and who added it
+4. **Trace `Received` headers bottom to top** — establish the real mail path
+5. **`grep -a "href" email.eml`** — find all hyperlinks in the body
+6. **Extract the Base64 attachment** — decode it to a file
+7. **`sha256sum`** — hash the attachment for threat intel lookup
+8. **Inspect archive contents** — look for disguised file types
+9. **Map to MITRE ATT&CK** — identify the technique
+
+---
+
+## Attack Overview
+
+The attacker impersonates a company called Business Finance Ltd. and targets an accounting team
+with an overdue invoice scam. The email is carefully constructed to pass every automated check:
+it uses a real domain the attacker controls (`business-finance.com`), so SPF, DKIM, and DMARC
+all return `pass`. The content uses professional language, a realistic invoice number
+(`INV-2025-0012`), and a specific dollar amount (`$4,750.00`). Two delivery vectors are present
+simultaneously — a phishing link (`secure.business-finance.com`) and a malicious ZIP attachment.
+Inside the ZIP, a `.bat` batch script is disguised as a PDF using the double extension technique.
+
+---
+
+## Questions & Answers
+
+### Task 1: What is the originating IP address of the sender?
+
+**File:** `email.eml`  
+**Where to look:** `X-Originating-IP` header (line 4)
+
+```bash
+grep -a "X-Originating-IP\|X-Sender-IP" email.eml
+```
+
+Output:
+
+```
+X-Originating-IP: [45.67.89.10]
+X-Sender-IP: 45.67.89.10
+```
+
+Both headers confirm the same IP. `X-Originating-IP` is added by some mail servers to record
+the IP address of the machine that originally submitted the email — the sender's real origin
+point before any relay. `X-Sender-IP` is a redundant custom header added by the same platform.
+
+To get more context about this IP, you can look it up:
+
+```bash
+# Quick whois lookup
+whois 45.67.89.10
+
+# Or check in a browser
+# https://ipinfo.io/45.67.89.10
+# https://www.virustotal.com/gui/ip-address/45.67.89.10
+```
+
+> **Answer:** `45.67.89.10`
+
+---
+
+### Task 2: Which mail server relayed this email before reaching the victim?
+
+**File:** `email.eml`  
+**Where to look:** `Received` headers (lines 15–23)
+
+```bash
+grep -a "^Received:" email.eml
+```
+
+Output:
+
+```
+Received: from mail.business-finance.com ([203.0.113.25])
+Received: from relay.business-finance.com ([198.51.100.45])
+Received: from finance@business-finance.com ([198.51.100.75])
+```
+
+Each `Received` header records one hop. To trace the full path, read them from **bottom to top**
+— the bottommost is the oldest (the origin), the topmost is the most recent (final delivery):
+
+```
+10:05 UTC  198.51.100.75    → relay.business-finance.com      (origin — sender's machine)
+10:10 UTC  198.51.100.45    → mail.business-finance.com       (internal relay)
+10:15 UTC  203.0.113.25     → mail.target.com                 (final delivery to victim)
+```
+
+The full topmost `Received` header reads:
+
+```
+Received: from mail.business-finance.com ([203.0.113.25])
+    by mail.target.com (Postfix) with ESMTP id ABC123;
+    Mon, 26 Feb 2025 10:15:00 +0000 (UTC)
+```
+
+This means: `mail.business-finance.com` at IP `203.0.113.25` handed the email to
+`mail.target.com` (the victim's mail server) using the Postfix mail transfer agent. This is
+the last relay before the email reached the victim — the answer to the question.
+
+> **Answer:** `203.0.113.25`
+
+---
+
+### Task 3: What is the sender's email address?
+
+**File:** `email.eml`  
+**Where to look:** `From` header (line 30)
+
+```bash
+grep -a "^From:" email.eml
+```
+
+Output:
+
+```
+From: "Finance Dept" <finance@business-finance.com>
+```
+
+The `From` header has two components: the **display name** (`"Finance Dept"`) and the **actual
+address** (`finance@business-finance.com`). Most email clients show only the display name in the
+inbox — which is why phishing emails often set a convincing display name while the real address
+is something suspicious. Always look at what is inside the angle brackets `< >`, not just the
+name shown in the inbox view.
+
+You can also cross-reference with the envelope headers:
+
+```bash
+grep -a "Return-Path\|X-Envelope-From\|smtp.mailfrom" email.eml
+```
+
+Output:
+
+```
+Return-Path: <finance@business-finance.com>
+X-Envelope-From: finance@business-finance.com
+     smtp.mailfrom=business-finance.com;
+```
+
+All three confirm the same address — sender, envelope, and SMTP `MAIL FROM` all match. In a
+spoofed email these would differ; here they are consistent because the attacker controls the
+domain.
+
+> **Answer:** `finance@business-finance.com`
+
+---
+
+### Task 4: What is the 'Reply-To' email address specified in the email?
+
+**File:** `email.eml`  
+**Where to look:** `Reply-To` header (line 2)
+
+```bash
+grep -a "^Reply-To:" email.eml
+```
+
+Output:
+
+```
+Reply-To: <support@business-finance.com>
+```
+
+The `Reply-To` header tells email clients where to send a reply. It can be set to any address —
+independent of the `From` address. When the recipient clicks "Reply", their client pre-fills
+`support@business-finance.com` rather than `finance@business-finance.com`.
+
+In this email both addresses share the same domain (`business-finance.com`), which makes it
+less obvious than an attack where the `Reply-To` points to a completely different domain (e.g.
+`From: ceo@legit-company.com` / `Reply-To: ceo@legit-c0mpany.com`). The key takeaway is to
+always check `Reply-To` separately from `From` — they are not the same thing.
+
+> **Answer:** `support@business-finance.com`
+
+---
+
+### Task 5: What is the SPF (Sender Policy Framework) result for this email?
+
+**File:** `email.eml`  
+**Where to look:** `Authentication-Results` header (lines 24–27) and `Received-SPF` header (line 7)
+
+```bash
+grep -a "spf=\|dkim=\|dmarc=\|Received-SPF" email.eml
+```
+
+Output:
+
+```
+Received-SPF: Pass (protection.outlook.com: domain of business-finance.com designates 45.67.89.10 as permitted sender)
+Authentication-Results: spf=pass (domain business-finance.com designates 45.67.89.10 as permitted sender)
+     dkim=pass header.d=business-finance.com;
+     dmarc=pass action=none header.from=business-finance.com;
+```
+
+All three authentication protocols return `pass`. Here is what each one actually means — and
+crucially, why passing all three does not mean this email is safe.
+
+**SPF (Sender Policy Framework)**
+
+SPF works by publishing a DNS record on a domain that lists which IP addresses are authorised
+to send email on behalf of that domain. When the victim's mail server receives this email from
+`45.67.89.10` claiming to be from `business-finance.com`, it queries the DNS record for
+`business-finance.com` and finds `45.67.89.10` listed as a permitted sender — so the check
+passes. The attacker registered `business-finance.com`, configured its DNS SPF record to
+authorise their own sending IP, and so the check passes by design. SPF tells you that the
+sending IP is authorised by the domain's owner — it says nothing about whether the domain owner
+is who they claim to be.
+
+**DKIM (DomainKeys Identified Mail)**
+
+DKIM works by having the sending mail server cryptographically sign parts of the email using a
+private key. The corresponding public key is published in the domain's DNS. When the receiving
+server gets the email, it retrieves the public key from DNS and verifies the signature. A `pass`
+means the signature is valid — the email was not modified in transit, and it was signed by
+someone who has access to the private key for `business-finance.com`. Again, the attacker owns
+`business-finance.com` and its private DKIM key, so they can sign everything correctly. DKIM
+proves the email was signed by the domain — not that the domain is trustworthy.
+
+**DMARC (Domain-based Message Authentication, Reporting, and Conformance)**
+
+DMARC is a policy layer that sits on top of SPF and DKIM. It requires that the domain in the
+`From` header aligns with the domain that passed SPF or DKIM. It also lets domain owners publish
+a policy declaring what to do with emails that fail: `none` (do nothing, just report), `quarantine`
+(send to spam), or `reject` (block). Here the result is `dmarc=pass action=none`:
+
+- **`pass`** — because `business-finance.com` appears in `From`, and SPF/DKIM both pass for
+  `business-finance.com`, the alignment check succeeds
+- **`action=none`** — the domain owner set their DMARC policy to `none`, meaning even if emails
+  fail, no action should be taken. This is a common misconfiguration (or in this case, deliberate
+  attacker choice) that makes DMARC effectively useless for enforcement
+
+**The key insight:** All three protocols pass because the attacker registered `business-finance.com`
+themselves. They control the domain, its DNS records, its SPF configuration, and its DKIM signing
+keys. These email authentication systems are designed to prevent one domain from impersonating
+another — they cannot detect an attacker who built their own convincing fake domain from scratch.
+This is called a **lookalike domain attack**: rather than spoofing `legit-company.com`, the
+attacker registers `business-finance.com` — a plausible-sounding name — and passes all checks
+legitimately.
+
+> **Answer:** `pass`
+
+---
+
+### Task 6: What is the domain used in the phishing URL inside the email?
+
+**File:** `email.eml`  
+**Where to look:** HTML body — `<a href>` tags
+
+```bash
+grep -a "href" email.eml
+```
+
+Output:
+
+```
+<a href="https://secure.business-finance.com/invoice/details/view/INV2025-0987/payment">Download Invoice</a>
+<a href='mailto:support@business-finance.com'>support@business-finance.com</a>
+```
+
+The first result is the phishing link. The recipient sees the display text `Download Invoice`
+rendered as a blue hyperlink — there is no visible indication of where it goes. The real
+destination is the `href` value: `https://secure.business-finance.com/invoice/details/view/INV2025-0987/payment`.
+
+To extract just the domain:
+
+```bash
+grep -ao 'href="https://[^/]*' email.eml | head -1
+```
+
+Output:
+
+```
+href="https://secure.business-finance.com
+```
+
+The domain is `secure.business-finance.com` — a subdomain of the attacker's fake domain. The
+`secure.` prefix is another legitimacy signal designed to reassure the victim that the link is
+safe.
+
+> **Answer:** `secure.business-finance.com`
+
+---
+
+### Task 7: What is the fake company name used in the email?
+
+**File:** `email.eml`  
+**Where to look:** `X-Organization` header, email body signature
+
+```bash
+grep -a "X-Organization\|Business Finance" email.eml
+```
+
+Output:
+
+```
+X-Organization: Business Finance Ltd.
+Best regards,<br>Finance Department<br>Business Finance Ltd.</p>
+```
+
+The company name appears in two places: the `X-Organization` custom header (which sets it at
+the metadata level) and the email body signature (which shows it to the recipient). The display
+name in the `From` header says `Finance Dept` — that is the department name, not the company.
+`Business Finance Ltd.` is the fake company the attacker constructed.
+
+> **Answer:** `Business Finance Ltd.`
+
+---
+
+### Task 8: What is the name of the attachment included in the email?
+
+**File:** `email.eml`  
+**Where to look:** `Content-Disposition` header in the attachment section
+
+```bash
+grep -a "Content-Disposition\|filename=" email.eml
+```
+
+Output:
+
+```
+Content-Disposition: attachment; filename="Invoice_2025_Payment.zip"
+```
+
+The `Content-Disposition: attachment` directive tells email clients that this section of the
+email should be treated as a downloadable file rather than displayed inline. The `filename=`
+parameter specifies the name that will appear in the attachment bar of the email client.
+
+You can also confirm the filename from the `Content-Type` header immediately above it:
+
+```bash
+grep -a "Content-Type: application" email.eml
+```
+
+Output:
+
+```
+Content-Type: application/zip; name="Invoice_2025_Payment.zip"
+```
+
+Both headers agree on the filename.
+
+> **Answer:** `Invoice_2025_Payment.zip`
+
+---
+
+### Task 9: What is the SHA-256 hash of the attachment?
+
+**File:** `email.eml` → extracted `Invoice_2025_Payment.zip`  
+**Method:** Extract the Base64 block and decode it, then hash
+
+Extract the attachment using the Python script from Step 5 of the methodology, then:
+
+```bash
+# Linux
+sha256sum Invoice_2025_Payment.zip
+# 8379c41239e9af845b2ab6c27a7509ae8804d7d73e455c800a551b22ba25bb4a  Invoice_2025_Payment.zip
+
+# Windows PowerShell
+Get-FileHash -Algorithm SHA256 .\Invoice_2025_Payment.zip
+# SHA256  8379C41239E9AF845B2AB6C27A7509AE8804D7D73E455C800A551B22BA25BB4A
+```
+
+With the hash in hand, you can submit it to threat intelligence platforms:
+
+```bash
+# Look up on VirusTotal (requires API key) or paste the hash into virustotal.com
+curl "https://www.virustotal.com/api/v3/files/8379c41239e9af845b2ab6c27a7509ae8804d7d73e455c800a551b22ba25bb4a" \
+  -H "x-apikey: YOUR_API_KEY"
+```
+
+> **Answer:** `8379C41239E9AF845B2AB6C27A7509AE8804D7D73E455C800A551B22BA25BB4A`
+
+---
+
+### Task 10: What is the filename of the malicious file contained within the ZIP attachment?
+
+**File:** `Invoice_2025_Payment.zip`  
+**Method:** Inspect archive contents
+
+```bash
+python3 -c "
+import zipfile
+with zipfile.ZipFile('Invoice_2025_Payment.zip') as z:
+    for info in z.infolist():
+        print(f'{info.filename}  ({info.file_size} bytes)')
+"
+```
+
+Output:
+
+```
+invoice_document.pdf.bat  (1,690,811 bytes)
+```
+
+**The double extension technique:** The malicious batch script is named
+`invoice_document.pdf.bat`. Windows hides known file extensions by default — so a victim
+browsing the ZIP in File Explorer would see `invoice_document.pdf` displayed with a PDF icon,
+because Windows strips the `.bat` extension from the visible filename. Double-clicking it would
+execute a Windows batch script, not open a PDF.
+
+The `.pdf` portion of the name is purely cosmetic — it is part of the filename, not an actual
+extension that Windows acts on. Only the final extension (`.bat`) determines how the OS treats
+the file.
+
+To protect against this: open Windows Explorer, go to View → Show → File name extensions, and
+enable it. With extensions visible, the file would display its true name `invoice_document.pdf.bat`
+and the `.bat` extension would be an immediate red flag.
+
+> **Answer:** `invoice_document.pdf.bat`
+
+---
+
+### Task 11: Which MITRE ATT&CK techniques are associated with this attack?
+
+**Source:** MITRE ATT&CK framework  
+**Where to look:** `attack.mitre.org` → Initial Access → Phishing
+
+The attacker's delivery mechanism is a phishing email with a malicious attachment. When the
+victim opens the ZIP and double-clicks the disguised `.bat` file, the malware executes. The
+MITRE ATT&CK framework organises this under:
+
+- **T1566** — Phishing (the parent technique covering all phishing-based initial access)
+- **T1566.001** — Phishing: Spearphishing Attachment (the sub-technique for malicious attachments)
+
+The `.001` sub-technique is distinguished from:
+
+- **T1566.002** — Spearphishing Link (clicking a malicious link, not an attachment)
+- **T1566.003** — Spearphishing via Service (using a third-party service like LinkedIn or WhatsApp)
+
+This email contains both a phishing link and a malicious attachment, but the primary execution
+path — the actual malware delivery — is the `.bat` file inside the ZIP, which maps to `.001`.
+
+> **Answer:** `T1566.001`
+
+---
+
+## Complete Header Reference Table
+
+One of the most important things to understand in email forensics is **who actually wrote each
+header** — because anything the sender writes can be faked, while anything the mail infrastructure
+writes cannot (at least not in a way the receiving server would accept as genuine).
+
+### Headers the attacker controls — treat these as unverified claims
+
+These headers are set by the sender before the email is transmitted. The attacker can put
+anything they want here. Never trust these at face value.
+
+| Header              | Value in this email                                 | Why it can be faked                              |
+| ------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| `Return-Path`       | `finance@business-finance.com`                      | Set by sending MTA — attacker controls their MTA |
+| `Reply-To`          | `support@business-finance.com`                      | Set freely by sender in email client             |
+| `X-Mailer`          | `Microsoft Outlook 16.0`                            | Self-reported by email client — trivially forged |
+| `X-Priority`        | `1 (Highest)`                                       | Set freely by sender                             |
+| `X-MSMail-Priority` | `High`                                              | Set freely by sender                             |
+| `X-Organization`    | `Business Finance Ltd.`                             | Custom header — anyone can add anything          |
+| `X-Envelope-From`   | `finance@business-finance.com`                      | Set by sending MTA — attacker controls their MTA |
+| `List-Unsubscribe`  | `unsubscribe@business-finance.com`                  | Set freely by sender                             |
+| `X-Sender-IP`       | `45.67.89.10`                                       | Set by sending MTA — not independently verified  |
+| `Message-ID`        | `<20250226101500.ABC123@business-finance.com>`      | Generated by sending MTA — attacker controls it  |
+| `Date`              | `Mon, 26 Feb 2025 10:15:00 +0000`                   | Self-reported — can be set to any timestamp      |
+| `From`              | `"Finance Dept" <finance@business-finance.com>`     | Set freely by sender — display name especially   |
+| `To`                | `"Accounting Dept" <accounts@globalaccounting.com>` | Set freely by sender                             |
+| `Subject`           | `Urgent: Invoice Payment Required - Overdue Notice` | Set freely by sender                             |
+| `MIME-Version`      | `1.0`                                               | Set freely by sender                             |
+| `Content-Type`      | `multipart/mixed; boundary="boundary123"`           | Set freely by sender                             |
+
+### Headers added by mail servers in transit — these cannot be faked by the sender
+
+These headers are stamped on the email by the mail servers that handle it along the way. The
+sender cannot inject a fake `Received` header that the receiving server would treat as genuine,
+because the receiving server appends its own `Received` entry when the email arrives — it doesn't
+trust or repeat what was already there.
+
+| Header                   | Value in this email                               | Who adds it                | What it proves                                          |
+| ------------------------ | ------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
+| `Received` (×3)          | Relay path from `198.51.100.75` to `203.0.113.25` | Each MTA on the path       | The actual servers that handled the email               |
+| `Received-SPF`           | `Pass`                                            | Victim's receiving MTA     | SPF result at time of delivery                          |
+| `Authentication-Results` | `spf=pass dkim=pass dmarc=pass`                   | Victim's receiving MTA     | Full auth check results — most trustworthy header       |
+| `X-AntiSpam`             | `Passed`                                          | Victim's spam filter       | Result of spam analysis — attacker cannot set this      |
+| `ARC-Seal`               | `cv=pass`                                         | Relay MTA (attacker-owned) | Chain integrity — only trustworthy if relay is neutral  |
+| `ARC-Message-Signature`  | `pass`                                            | Relay MTA (attacker-owned) | Header signature — only trustworthy if relay is neutral |
+
+**Important caveat on `X-Originating-IP`:** This header sits in a grey area. It is added by the
+_submitting_ mail server (the first server the email touches) — not by the sender's email
+client directly. In a scenario where the attacker runs their own mail server, they control that
+server and could choose not to add this header, or add a false value. If it is present and was
+added by a neutral provider (like Microsoft Exchange or Google Workspace), it can be trusted. If
+the attacker runs their own mail server, it should be cross-referenced against the `Received`
+headers rather than taken alone.
+
+**The `Authentication-Results` header is the most forensically trustworthy** — it is written by
+the _receiving_ server (the victim's mail infrastructure), which has no reason to lie. The
+`Received-SPF` header is the raw version of the same thing. These two are your ground truth for
+authentication status.
+
+---
+
+## MITRE ATT&CK Mapping
+
+| Phase           | Technique ID | Technique Name                                           | Evidence                                                        |
+| --------------- | ------------ | -------------------------------------------------------- | --------------------------------------------------------------- |
+| Initial Access  | T1566.001    | Phishing: Spearphishing Attachment                       | Malicious ZIP with `invoice_document.pdf.bat` attached to email |
+| Defense Evasion | T1036.007    | Masquerading: Double File Extension                      | `.bat` disguised as `.pdf` via double extension in filename     |
+| Execution       | T1059.003    | Command and Scripting Interpreter: Windows Command Shell | Payload is a `.bat` Windows batch script                        |
+
+---
+
+## Skills Learned
+
+- Opening and reading `.eml` files raw in a text editor and with `cat` / `grep` on the command line
+- Understanding the three sections of an email file: headers, body, and MIME attachment sections
+- Reading every email header — what each one means, who adds it, and whether it can be forged
+- Tracing the full mail relay path using `Received` headers, reading bottom to top
+- Understanding SPF, DKIM, and DMARC — and why all three passing does not mean an email is safe
+- Recognising lookalike domain attacks where the attacker registers a convincing fake domain
+- Finding phishing URLs hidden behind display text using `grep -a "href"`
+- Extracting Base64-encoded attachments from `.eml` files using Python
+- Hashing files with `sha256sum` / `Get-FileHash` for threat intelligence lookup
+- Recognising the double extension technique (`file.pdf.bat`) and enabling extension display in Windows
+- Mapping email-based attack techniques to MITRE ATT&CK T1566.001

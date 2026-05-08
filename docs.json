@@ -146,15 +146,12 @@
           {
             "group": "DFIR",
             "root": "sherlocks/dfir/index",
-            "pages": [
-              "sherlocks/dfir/vantage",
-              "sherlocks/dfir/brutus"
-            ]
+            "pages": ["sherlocks/dfir/vantage", "sherlocks/dfir/brutus"]
           },
           {
             "group": "SOC",
             "root": "sherlocks/soc/index",
-            "pages": ["sherlocks/soc/telly"]
+            "pages": ["sherlocks/soc/telly", "sherlocks/soc/phisnet"]
           },
           {
             "group": "Malware Analysis",
