@@ -1,7 +1,5 @@
 # Noxious - HTB Sherlock Writeup (DFIR / Network Forensics)
 
-![Noxious Banner](/images/sherlocks/noxious.png)
-
 ## Challenge Description
 
 > The IDS device alerted us to a possible rogue device in the internal Active Directory network.
@@ -34,9 +32,26 @@ network can respond. LLMNR runs on **UDP port 5355** and uses the multicast addr
 **Why this is dangerous:** LLMNR has no authentication. Any machine can respond to any query,
 and the querying machine will trust the first response it receives. An attacker running a tool
 called **Responder** on the local network listens for LLMNR queries and immediately responds to
-them, claiming to be whatever hostname was requested. The victim machine then attempts to
-authenticate to what it believes is a legitimate server — sending the user's NTLMv2 hash. The
-attacker captures the hash and can attempt to crack it offline.
+them, claiming to be whatever hostname was requested.
+
+**When exactly does the hash get sent?** This is important to understand correctly. The hash is
+not sent in response to the LLMNR reply itself. The sequence is more specific:
+
+1. The victim's LLMNR query asks "who is DCC01?" — the attacker's Responder replies "I am DCC01,
+   my IP is `172.17.79.135`"
+2. The victim's machine now believes `172.17.79.135` is `DCC01` and tries to connect to the file
+   share it originally wanted — but on the attacker's IP
+3. Windows automatically tries to authenticate to that SMB share using the logged-in user's
+   credentials. This authentication uses the NTLM protocol, which works as a challenge-response:
+   the "server" (Responder) sends a challenge, and the client responds with an NTLMv2 hash
+   computed from the user's password and that challenge
+4. Responder captures this NTLMv2 hash
+
+So the hash is not sent because of the LLMNR response directly — it is sent because Windows
+automatically attempts SMB authentication to what it now believes is a legitimate file server at
+`172.17.79.135`. Responder acts as both the fake LLMNR server _and_ the fake SMB server. The
+victim never sees an error or prompt; Windows handles the authentication transparently in the
+background, and the attacker intercepts it.
 
 **The attack in three steps:**
 
@@ -65,11 +80,11 @@ overview of all IP addresses communicating in the capture and how much traffic e
 | 172.17.79.136     | 17,483  | Victim — `Forela-WKstn002` (named in scenario)     |
 | 172.17.79.129     | 9,091   | High volume — further investigation needed         |
 | 172.17.79.4       | 1,407   | Low-volume internal — likely the Domain Controller |
-| **172.17.79.135** | **140** | **Suspicious — unusually low but active**          |
+| **172.17.79.135** | **140** | **Unknown — not yet identified**                   |
 
-`172.17.79.135` stands out because it has very few packets but is actively communicating with the
-victim. In a normal network, a machine with only 140 total packets is not doing regular user
-activity — it is doing something targeted. We keep this IP in mind.
+`172.17.79.135` is not immediately suspicious from the Endpoints view alone — packet count tells
+us nothing definitive about intent. What this view gives us is a list of internal IPs to keep in
+mind. We now need to understand what each one is actually doing.
 
 To identify the Domain Controller specifically, apply a DNS filter:
 
@@ -113,10 +128,13 @@ Two things are immediately visible:
 typo. The victim was trying to navigate to a file share on `DC01` but typed `DCC01`, which does
 not exist in DNS. That failure triggered the LLMNR broadcast.
 
-**The responder is `172.17.79.135`** — not the Domain Controller (`172.17.79.4`). In a
-legitimate network, the DC would answer these queries. `172.17.79.135` has no business responding
-to LLMNR queries, and the fact that it responds within milliseconds to every `DCC01` query is
-characteristic of Responder running in listen mode.
+**The responder is `172.17.79.135`** — not the Domain Controller (`172.17.79.4`), which we
+already confirmed from DNS traffic. The DC is the only machine in this network that should
+legitimately answer LLMNR queries for domain resources. `172.17.79.135` is not the DC, and the
+fact that it responds within milliseconds to every `DCC01` query is characteristic of Responder
+running in listen mode. Whether this machine is rogue or domain-joined, we do not yet know —
+but its behavior of answering LLMNR queries it has no authority over demands further
+investigation. That is what Step 3 (DHCP) is for.
 
 ---
 
@@ -319,18 +337,43 @@ Responder captured the hash and the victim's machine retried authentication mult
 Before reading timestamps, set Wireshark to display UTC time:
 `View > Time Display Format > UTC Date and Time of Day`
 
-Filter for `ntlmssp`. The first packet in the list is a `NTLMSSP_NEGOTIATE` — the very start of
-the first authentication attempt. The timestamp on this packet is the moment the credentials were
-first relayed to the attacker's machine. Check its time in the Time column:
+**What "relayed multiple times" actually means here:** The question uses the word "relayed" but
+this is slightly misleading for this specific scenario. What you see in the PCAP is not an SMB
+relay attack (where the hash is forwarded to a third machine to authenticate somewhere else).
+What you actually see is multiple complete NTLM authentication sets — NEGOTIATE, CHALLENGE, AUTH
+— occurring in rapid succession, all directed from the victim to the attacker's machine. This
+happens because Windows automatically retries authentication when a connection attempt fails or
+is rejected, and Responder deliberately keeps rejecting sessions after capturing the hash to
+collect multiple copies. Each retry is a new complete three-packet set, and each one contains the
+captured hash. You can see this clearly in the `ntlmssp` filter: instead of one NEGOTIATE →
+CHALLENGE → AUTH sequence, there are many, all within seconds of each other, all going to the
+same destination:
 
 ```
-2024-06-24 11:18:30  NTLMSSP_NEGOTIATE
+11:18:30  NTLMSSP_NEGOTIATE  (set 1)
+11:18:30  NTLMSSP_CHALLENGE
+11:18:30  NTLMSSP_AUTH       ← hash captured (1st time)
+
+11:18:30  NTLMSSP_NEGOTIATE  (set 2)
+11:18:30  NTLMSSP_CHALLENGE
+11:18:30  NTLMSSP_AUTH       ← hash captured again
+
+11:18:30  NTLMSSP_NEGOTIATE  (set 3)
+...
+```
+
+If this were a single legitimate authentication, you would expect exactly one NEGOTIATE →
+CHALLENGE → AUTH sequence, not a rapid burst of them. Multiple sets in under a second is a
+reliable indicator that Responder is on the other end.
+
+The timestamp question asks specifically about the first time — the very first `NTLMSSP_NEGOTIATE`
+packet in the list:
+
+```
+2024-06-24 11:18:30  NTLMSSP_NEGOTIATE  ← first capture begins here
 2024-06-24 11:18:30  NTLMSSP_CHALLENGE
 2024-06-24 11:18:30  NTLMSSP_AUTH       ← hash captured here
 ```
-
-All three packets of the first set occur within the same second, confirming the instant nature of
-Responder's interception.
 
 > **Answer:** `2024-06-24 11:18:30`
 
@@ -433,16 +476,27 @@ expects. The format is:
 User::Domain:ServerChallenge:NTProofStr:NTLMv2Response(without first 32 characters)
 ```
 
-The NTLMv2Response (full blob) is found in the same `NTLMSSP_AUTH` packet, directly above where
-we found NTProofStr:
+The NTLMv2Response (full blob) is found in the same `NTLMSSP_AUTH` packet as NTProofStr. Go
+back one level from where you found NTProofStr — instead of expanding all the way down to
+`NTProofStr`, stop at `NTLMv2 Response` itself:
 
 ```
-SMB2 > ... > NTLM Response > NTLMv2 Response
+SMB2 > Session Setup Response (0x1) > Security Blob > GSS-API Generic >
+Simple Protected Negotiation > negTokenTarg > NTLM Secure Service Provider >
+NTLM Response > NTLMv2 Response
 ```
 
-The full NTLMv2Response value starts with the NTProofStr (`c0cc803a...`) followed by the blob.
-**Remove the first 32 characters** (the NTProofStr we already have) before using it in the
-format — otherwise we would be duplicating it.
+Click `NTLMv2 Response` to select it. In the hex pane at the bottom of Wireshark, the bytes
+belonging to this field are highlighted. Right-click `NTLMv2 Response` in the packet tree and
+select **Copy > Value** — this gives you the full hex string of the entire response blob.
+
+The value you get will start with `c0cc803a6d9fb5a9082253a04dbd4cd4` — which is exactly the
+NTProofStr. That is expected: the NTLMv2 Response blob begins with NTProofStr and is immediately
+followed by the rest of the blob (client challenge, timestamp, target info, etc.).
+
+**Remove the first 32 characters** from this value (the NTProofStr portion) before using it in
+the hash format — the format already has NTProofStr as its own separate field, so if you leave it
+in the blob you would be duplicating it and the hash would be malformed.
 
 Assembled hash:
 
