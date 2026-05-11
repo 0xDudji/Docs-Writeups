@@ -1,0 +1,569 @@
+# Noxious - HTB Sherlock Writeup (DFIR / Network Forensics)
+
+![Noxious Banner](/images/sherlocks/noxious.png)
+
+## Challenge Description
+
+> The IDS device alerted us to a possible rogue device in the internal Active Directory network.
+> The Intrusion Detection System also indicated signs of LLMNR traffic, which is unusual. It is
+> suspected that an LLMNR poisoning attack occurred. The LLMNR traffic was directed towards
+> Forela-WKstn002, which has the IP address 172.17.79.136. A limited packet capture from the
+> surrounding time is provided to you, our Network Forensics expert. Since this occurred in the
+> Active Directory VLAN, it is suggested that we perform network threat hunting with the Active
+> Directory attack vector in mind, specifically focusing on LLMNR poisoning.
+
+**Difficulty:** Very Easy  
+**Category:** DFIR / Network Forensics  
+**Evidence File:** `capture.pcap` (29,304 packets, capture window: `2024-06-24 11:17:22` to `2024-06-24 11:40:07` UTC)
+
+---
+
+## Understanding LLMNR Poisoning
+
+Before opening Wireshark, it is worth understanding what the IDS alerted on and what the attack
+actually looks like at the network level.
+
+**What LLMNR is:** Link-Local Multicast Name Resolution (LLMNR) is a Windows protocol that
+resolves hostnames on the local network when DNS fails. If a machine tries to reach a hostname and
+the DNS server cannot resolve it — either because the server is unavailable, or because the
+hostname simply does not exist — Windows falls back to broadcasting an LLMNR query on the local
+network segment asking "does anyone know where `<hostname>` is?" Any machine on the same local
+network can respond. LLMNR runs on **UDP port 5355** and uses the multicast address `224.0.0.252`
+(IPv4) or `ff02::1:3` (IPv6).
+
+**Why this is dangerous:** LLMNR has no authentication. Any machine can respond to any query,
+and the querying machine will trust the first response it receives. An attacker running a tool
+called **Responder** on the local network listens for LLMNR queries and immediately responds to
+them, claiming to be whatever hostname was requested. The victim machine then attempts to
+authenticate to what it believes is a legitimate server — sending the user's NTLMv2 hash. The
+attacker captures the hash and can attempt to crack it offline.
+
+**The attack in three steps:**
+
+1. Victim types a hostname that does not exist (often a typo) — DNS fails to resolve it
+2. Windows broadcasts an LLMNR query asking the local network to resolve it
+3. Responder on the attacker's machine responds, victim sends NTLMv2 credentials to the attacker
+
+**MITRE ATT&CK:** T1557.001 — Adversary-in-the-Middle: LLMNR/NBT-NS Poisoning and SMB Relay
+
+---
+
+## Initial Analysis Methodology
+
+Before answering any questions, the goal is to understand who the players are and what happened —
+using only the PCAP evidence.
+
+---
+
+### Step 1 — Endpoints: Who is on this network?
+
+Open the PCAP in Wireshark and go to `Statistics > Endpoints > IPv4`. This gives an immediate
+overview of all IP addresses communicating in the capture and how much traffic each generates.
+
+| Address           | Packets | Role                                               |
+| ----------------- | ------- | -------------------------------------------------- |
+| 172.17.79.136     | 17,483  | Victim — `Forela-WKstn002` (named in scenario)     |
+| 172.17.79.129     | 9,091   | High volume — further investigation needed         |
+| 172.17.79.4       | 1,407   | Low-volume internal — likely the Domain Controller |
+| **172.17.79.135** | **140** | **Suspicious — unusually low but active**          |
+
+`172.17.79.135` stands out because it has very few packets but is actively communicating with the
+victim. In a normal network, a machine with only 140 total packets is not doing regular user
+activity — it is doing something targeted. We keep this IP in mind.
+
+To identify the Domain Controller specifically, apply a DNS filter:
+
+```
+dns
+```
+
+Enable `View > Name Resolution > Resolve Network Addresses`. DNS traffic from `172.17.79.4`
+resolves queries for `dc01.forela.local`, confirming it as the Domain Controller. This is
+important: in a legitimate network, the DC is the only machine that should respond to LLMNR
+queries. Any other machine responding is a red flag.
+
+---
+
+### Step 2 — LLMNR Traffic: Who is answering queries they shouldn't be?
+
+Filter for LLMNR traffic:
+
+```
+udp.port == 5355
+```
+
+Or equivalently:
+
+```
+llmnr
+```
+
+The packet list now shows only LLMNR traffic. Sort by time and read the pattern:
+
+| Time                | Source            | Destination       | Type         | Query     |
+| ------------------- | ----------------- | ----------------- | ------------ | --------- |
+| 11:18:30.895766     | 172.17.79.136     | 224.0.0.252       | Query        | DCC01     |
+| 11:18:30.896077     | 172.17.79.136     | 224.0.0.252       | Query        | DCC01     |
+| **11:18:30.902155** | **172.17.79.135** | **172.17.79.136** | **Response** | **DCC01** |
+| **11:18:30.907809** | **172.17.79.135** | **172.17.79.136** | **Response** | **DCC01** |
+
+Two things are immediately visible:
+
+**The query name is `DCC01`** — not `DC01`, the actual domain controller hostname. This is a
+typo. The victim was trying to navigate to a file share on `DC01` but typed `DCC01`, which does
+not exist in DNS. That failure triggered the LLMNR broadcast.
+
+**The responder is `172.17.79.135`** — not the Domain Controller (`172.17.79.4`). In a
+legitimate network, the DC would answer these queries. `172.17.79.135` has no business responding
+to LLMNR queries, and the fact that it responds within milliseconds to every `DCC01` query is
+characteristic of Responder running in listen mode.
+
+---
+
+### Step 3 — DHCP: Confirm the rogue machine's identity
+
+Now that we have the suspicious IP, confirm what machine it is. When a device joins a network, it
+uses DHCP to get an IP address. The DHCP request contains the machine's hostname. Apply:
+
+```
+ip.addr == 172.17.79.135 && dhcp
+```
+
+Three packets appear. Open the DHCP Request packet and expand the options:
+
+```
+> Option: (57) Maximum DHCP Message Size
+> Option: (12) Host Name
+    Length: 4
+    Host Name: kali
+> Option: (255) End
+```
+
+The hostname is `kali` — the name of the Kali Linux distribution, an offensive security platform
+used for penetration testing and attacks. This machine is not a domain-joined Windows workstation.
+It is a Linux attacker machine running Responder.
+
+---
+
+### Step 4 — SMB and NTLMSSP: Confirm credential capture
+
+Now that we know the attacker's machine poisoned LLMNR and redirected the victim, we need to
+confirm that credentials were actually captured. When the victim's machine tried to authenticate
+to what it thought was `DCC01`, it would have sent NTLMv2 credentials over SMB. Apply:
+
+```
+ntlmssp
+```
+
+Multiple NTLM authentication negotiations appear, all occurring at `11:18:30` — exactly when the
+LLMNR responses were sent. This confirms the credential capture was successful.
+
+NTLM authentication always occurs in sets of exactly **three packets**:
+
+```
+NTLMSSP_NEGOTIATE  → client opens negotiation
+NTLMSSP_CHALLENGE  ← server sends challenge
+NTLMSSP_AUTH       → client responds with hashed credentials
+```
+
+The NTLM traffic uses **IPv6 link-local addresses** (`fe80::` range) rather than the IPv4
+addresses we've been tracking. This is normal — Windows often prefers IPv6 for local SMB
+communication. Enable `View > Name Resolution > Resolve Network Addresses` to see Wireshark
+display the hostnames rather than raw IPv6 addresses.
+
+In the `NTLMSSP_AUTH` packet, expanding the SMB2 session tree reveals the username:
+`john.deacon` in the `FORELA` domain. The timeline aligns perfectly: LLMNR query at 11:18:30,
+LLMNR response from attacker at 11:18:30, NTLM authentication also at 11:18:30.
+
+---
+
+### Step 5 — SMB File Share: What was the victim actually doing?
+
+Apply an SMB2 filter to see the full picture:
+
+```
+smb2
+```
+
+Scroll through and find Tree Connect requests — these are SMB operations that connect to a file
+share path. You will find:
+
+```
+Tree Connect Request Tree: \\DC01\DC-Confidential
+```
+
+This was the victim's intended destination: a confidential share on the real Domain Controller
+`DC01`. The typo `DCC01` instead of `DC01` is what triggered the entire attack chain. About 40
+seconds after the LLMNR poisoning event, the victim corrected their typo and successfully
+connected to the real `DC01` — visible in the SMB2 traffic as a legitimate tree connect.
+
+---
+
+### Methodology Summary
+
+In Active Directory network threat hunting, follow this sequence for LLMNR poisoning:
+
+1. **Identify the Domain Controller IP** — filter DNS traffic; the DC serves all domain name
+   resolutions and its IP is the only legitimate LLMNR responder
+2. **Filter LLMNR (`udp.port == 5355`)** — look for any machine _other than the DC_ responding
+   to queries; that machine is a rogue device
+3. **Note the queried hostname** — if it looks like a typo of a real hostname, that is what
+   triggered the LLMNR fallback
+4. **Filter DHCP for the rogue IP** — confirm the device's hostname to identify what it is
+5. **Filter `ntlmssp`** — confirm credentials were captured; check timestamps align with LLMNR
+6. **Cross-reference timestamps** — LLMNR response and NTLM negotiation occurring within the
+   same second is the smoking gun that proves the poisoning attack succeeded
+7. **Filter `smb2`** for Tree Connect — find the actual file share the victim intended to reach
+
+---
+
+## Attack Timeline
+
+| Time (UTC)     | Event                                                                            | Source       |
+| -------------- | -------------------------------------------------------------------------------- | ------------ |
+| `11:17:33`     | `172.17.79.135` (Kali) issues DHCP Discover — attacker joins the network segment | PCAP (DHCP)  |
+| `11:18:30.895` | Victim `172.17.79.136` broadcasts LLMNR query for `DCC01`                        | PCAP (LLMNR) |
+| `11:18:30.902` | Attacker `172.17.79.135` responds to LLMNR query, claiming to be `DCC01`         | PCAP (LLMNR) |
+| `11:18:30.919` | Victim initiates SMB/NTLM authentication — NTLMSSP_NEGOTIATE sent                | PCAP (SMB2)  |
+| `11:18:30.921` | Attacker sends NTLMSSP_CHALLENGE with server challenge `601019d191f054f1`        | PCAP (SMB2)  |
+| `11:18:30.922` | **Victim sends NTLMSSP_AUTH — `john.deacon`'s NTLMv2 hash captured**             | PCAP (SMB2)  |
+| `11:18:30–40`  | Credentials relayed multiple times (multiple NTLM sets in rapid succession)      | PCAP (SMB2)  |
+| `11:19:11`     | Victim connects to real `\\DC01\DC-Confidential` (corrected the typo)            | PCAP (SMB2)  |
+
+---
+
+## Questions & Answers
+
+### Task 1: It is suspected by the security team that there was a rogue device in Forela's internal network running Responder to perform an LLMNR Poisoning attack. Please find the malicious IP address of the machine.
+
+**PCAP:** `capture.pcap`  
+**Filter:** `udp.port == 5355`
+
+Apply the LLMNR filter. The victim machine `172.17.79.136` broadcasts queries for the hostname
+`DCC01` to the multicast address `224.0.0.252`. In a legitimate network, the Domain Controller
+(`172.17.79.4`) would be the only machine to respond to these queries. Instead, we see a
+completely different machine responding:
+
+```
+11:18:30.902155  172.17.79.135 → 172.17.79.136  [LLMNR Response] DCC01
+11:18:30.907809  172.17.79.135 → 172.17.79.136  [LLMNR Response] DCC01
+```
+
+`172.17.79.135` is not the Domain Controller, it is not any known domain-joined machine, and it
+responds to every single LLMNR query within milliseconds — the response pattern of an automated
+tool listening on the wire rather than a machine that actually hosts the queried resource.
+
+> **Answer:** `172.17.79.135`
+
+---
+
+### Task 2: What is the hostname of the rogue machine?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `ip.addr == 172.17.79.135 && dhcp`
+
+When any machine joins a network and requests an IP from DHCP, the DHCP Request packet includes
+the machine's hostname in Option 12. Apply the filter above — three packets appear. Open the DHCP
+Request from `172.17.79.135` and expand the options section:
+
+```
+> Option: (12) Host Name
+    Length: 4
+    Host Name: kali
+```
+
+`kali` is the default hostname of Kali Linux, the offensive security distribution used by
+penetration testers and attackers. This is not a Windows domain machine — it has no legitimate
+reason to be on the Active Directory VLAN and is clearly the attacker's device running Responder.
+
+> **Answer:** `kali`
+
+---
+
+### Task 3: Now we need to confirm whether the attacker captured the user's hash and it is crackable. What is the username whose hash was captured?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `ntlmssp`
+
+After the LLMNR poisoning, the victim machine tries to authenticate to what it thinks is `DCC01`
+over SMB. This triggers NTLM authentication. Apply the `ntlmssp` filter — multiple authentication
+sets appear, all directed from the victim toward the attacker's machine.
+
+In any of the `NTLMSSP_AUTH` packets (the third packet in each set), expand:
+
+```
+SMB2 > Session Setup Response (0x1) > Security Blob > GSS-API >
+Simple Protected Negotiation > negTokenTarg > NTLM Secure Service Provider >
+NTLM Response > NTLMv2 Response
+```
+
+The `Domain name` and `User name` fields confirm:
+
+```
+Domain: FORELA
+User:   john.deacon
+```
+
+The fact that multiple sets of NTLM negotiations occurred — all within seconds — confirms that
+Responder captured the hash and the victim's machine retried authentication multiple times.
+
+> **Answer:** `john.deacon`
+
+---
+
+### Task 4: In NTLM traffic we can see that the victim credentials were relayed multiple times to the attacker's machine. When were the hashes captured the first time?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `ntlmssp`
+
+Before reading timestamps, set Wireshark to display UTC time:
+`View > Time Display Format > UTC Date and Time of Day`
+
+Filter for `ntlmssp`. The first packet in the list is a `NTLMSSP_NEGOTIATE` — the very start of
+the first authentication attempt. The timestamp on this packet is the moment the credentials were
+first relayed to the attacker's machine. Check its time in the Time column:
+
+```
+2024-06-24 11:18:30  NTLMSSP_NEGOTIATE
+2024-06-24 11:18:30  NTLMSSP_CHALLENGE
+2024-06-24 11:18:30  NTLMSSP_AUTH       ← hash captured here
+```
+
+All three packets of the first set occur within the same second, confirming the instant nature of
+Responder's interception.
+
+> **Answer:** `2024-06-24 11:18:30`
+
+---
+
+### Task 5: What was the typo made by the victim when navigating to the file share that caused their credentials to be leaked?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `udp.port == 5355`
+
+In the LLMNR traffic, every query from `172.17.79.136` asks for the same hostname. Read the
+`Name` field in the packet details:
+
+```
+Queries:
+  DCC01: type A, class IN
+  DCC01: type AAAA, class IN
+```
+
+The actual Domain Controller hostname is `DC01`. The victim typed `DCC01` — an extra `C`. This
+hostname does not exist in DNS (`dc01.forela.local` exists, `dcc01.forela.local` does not), so
+the DNS query failed and Windows fell back to LLMNR — which the attacker was waiting to exploit.
+
+This typo is also confirmed in the NTLMSSP traffic: in the `NTLMSSP_AUTH` packets, the target
+server name (`netname`) field shows `DCC01`, because the victim's machine genuinely believes it
+is talking to a server called `DCC01`.
+
+> **Answer:** `DCC01`
+
+---
+
+### Task 6: To get the actual credentials of the victim user we need to stitch together multiple values from the NTLM negotiation packets. What is the NTLM server challenge value?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `ntlmssp`
+
+The server challenge is found in the `NTLMSSP_CHALLENGE` packet — the second packet of any NTLM
+set. Click it and expand:
+
+```
+SMB2 > Session Setup Response (0x1) > Security Blob > GSS-API Generic >
+Simple Protected Negotiation > negTokenTarg > NTLM Secure Service Provider >
+NTLM Server Challenge
+```
+
+The value shown is:
+
+```
+NTLM Server Challenge: 601019d191f054f1
+```
+
+The server challenge is an 8-byte random value generated by the "server" (in this case Responder
+on the attacker's Kali machine). The client uses this challenge, combined with its own client
+challenge and the user's password hash, to compute the NTLMv2 response. To crack the password
+offline, we need both this challenge and the NTProofStr from the AUTH packet.
+
+> **Answer:** `601019d191f054f1`
+
+---
+
+### Task 7: Now doing something similar, find the NTProofStr value.
+
+**PCAP:** `capture.pcap`  
+**Filter:** `ntlmssp`
+
+The NTProofStr is found in the `NTLMSSP_AUTH` packet — the third packet of the same NTLM set.
+Click it and expand:
+
+```
+SMB2 > Session Setup Response (0x1) > Security Blob > GSS-API Generic >
+Simple Protected Negotiation > negTokenTarg > NTLM Secure Service Provider >
+NTLM Response > NTLMv2 Response > NTProofStr
+```
+
+The value shown is:
+
+```
+NTProofStr: c0cc803a6d9fb5a9082253a04dbd4cd4
+```
+
+NTProofStr is the first 16 bytes (32 hex characters) of the full NTLMv2 Response. It is the
+HMAC-MD5 of the server challenge, client challenge, timestamp, and target information — computed
+using the user's NT hash as the key. Extracting it separately is necessary because when we
+assemble the hash for cracking, we insert it between the server challenge and the remaining
+response bytes.
+
+> **Answer:** `c0cc803a6d9fb5a9082253a04dbd4cd4`
+
+---
+
+### Task 8: To test the password complexity, try recovering the password from the information found from the packet capture. What is the password?
+
+**PCAP:** `capture.pcap`  
+**Method:** Assemble the NTLMv2 hash and crack with Hashcat
+
+To crack the password, assemble the captured values into the NTLMv2 hash format that Hashcat
+expects. The format is:
+
+```
+User::Domain:ServerChallenge:NTProofStr:NTLMv2Response(without first 32 characters)
+```
+
+The NTLMv2Response (full blob) is found in the same `NTLMSSP_AUTH` packet, directly above where
+we found NTProofStr:
+
+```
+SMB2 > ... > NTLM Response > NTLMv2 Response
+```
+
+The full NTLMv2Response value starts with the NTProofStr (`c0cc803a...`) followed by the blob.
+**Remove the first 32 characters** (the NTProofStr we already have) before using it in the
+format — otherwise we would be duplicating it.
+
+Assembled hash:
+
+```
+john.deacon::FORELA:601019d191f054f1:c0cc803a6d9fb5a9082253a04dbd4cd4:010100000000000080e4d59406c6da01cc3dcfc0de9b5f2600000000020008004e0042004600590001001e00570049004e002d00360036004100530035004c003100470052005700540004003400570049004e002d00360036004100530035004c00310047005200570054002e004e004200460059002e004c004f00430041004c00030014004e004200460059002e004c004f00430041004c00050014004e004200460059002e004c004f00430041004c000700080080e4d59406c6da01060004000200000008003000300000000000000000000000002000 00eb2ecbc5200a40b89ad5831abf821f4f20a2c7f352283a35600377e1f294f1c90a001000000000000000000000000000000000000900140063006900660073002f00440043004300300031000000000000000000
+```
+
+Save this to a file and crack with Hashcat using mode 5600 (NetNTLMv2):
+
+```bash
+hashcat -a 0 -m 5600 hash.txt rockyou.txt
+```
+
+Hashcat output:
+
+```
+Hash.Mode........: 5600 (NetNTLMv2)
+Hash.Target......: JOHN.DEACON::FORELA:601019d191f054f1:c0cc803a6d9fb5...
+Time.Started.....: 0 secs
+Candidates.#1....: NotMyPassword0K? → NotMyPassword0K?
+```
+
+The password cracked instantly from the rockyou wordlist, which means if the attacker captured
+this hash, they would have had the plaintext password within seconds. This highlights the
+critical importance of strong, non-dictionary passwords in Active Directory environments.
+
+> **Answer:** `NotMyPassword0K?`
+
+---
+
+### Task 9: Just to get more context surrounding the incident, what is the actual file share that the victim was trying to navigate to?
+
+**PCAP:** `capture.pcap`  
+**Filter:** `smb2`
+
+Clear the ntlmssp filter and apply `smb2`. Scroll through the packets and look for Tree Connect
+Request entries — these are the SMB operations that establish a connection to a file share path.
+The Info column will show:
+
+```
+Tree Connect Request Tree: \\DC01\DC-Confidential
+```
+
+This appears approximately 40 seconds after the LLMNR poisoning event, at `11:19:11`. This is
+the victim correcting their typo and successfully connecting to the real Domain Controller. The
+`DC-Confidential` share name confirms this was a sensitive resource — the attacker not only
+captured credentials but also learned what confidential share the victim was targeting.
+
+> **Answer:** `\\DC01\DC-Confidential`
+
+---
+
+## Key Wireshark Filters Reference
+
+| Purpose                    | Filter                             |
+| -------------------------- | ---------------------------------- |
+| LLMNR traffic only         | `udp.port == 5355` or `llmnr`      |
+| DHCP for rogue machine     | `ip.addr == 172.17.79.135 && dhcp` |
+| SMB2 traffic only          | `smb2`                             |
+| NTLM negotiations only     | `ntlmssp`                          |
+| DNS (to identify DC)       | `dns`                              |
+| Rogue machine all traffic  | `ip.addr == 172.17.79.135`         |
+| Victim machine all traffic | `ip.addr == 172.17.79.136`         |
+| LLMNR from victim only     | `llmnr && ip.src == 172.17.79.136` |
+| LLMNR from rogue only      | `llmnr && ip.src == 172.17.79.135` |
+
+---
+
+## Network Topology
+
+```
+Domain Controller (172.17.79.4) — dc01.forela.local
+    ↑
+    | (legitimate SMB, port 445)
+    |
+Victim: Forela-WKstn002 (172.17.79.136)
+    |
+    | LLMNR query: "Who is DCC01?" → multicast 224.0.0.252
+    ↓
+Attacker: kali (172.17.79.135) ← Responder listening on UDP 5355
+    |
+    | "I am DCC01" → responds to victim
+    ↓
+Victim sends NTLMv2 credentials (john.deacon::FORELA) to attacker over SMB port 445
+```
+
+---
+
+## MITRE ATT&CK Mapping
+
+| Phase             | Technique ID | Technique Name                                  | Evidence                                                        |
+| ----------------- | ------------ | ----------------------------------------------- | --------------------------------------------------------------- |
+| Credential Access | T1557.001    | Adversary-in-the-Middle: LLMNR/NBT-NS Poisoning | Kali machine responding to LLMNR queries, capturing NTLMv2 hash |
+| Credential Access | T1110.002    | Brute Force: Password Cracking                  | NTLMv2 hash cracked with Hashcat/rockyou in seconds             |
+| Discovery         | T1046        | Network Service Discovery                       | Responder listening passively on the network segment            |
+| Collection        | T1557        | Adversary-in-the-Middle                         | Credentials intercepted mid-authentication flow                 |
+
+---
+
+## Remediation
+
+**If LLMNR is not required:** Disable it via Group Policy at `Computer Configuration > Administrative Templates > Network > DNS Client > Turn off multicast name resolution`.
+
+**If LLMNR cannot be disabled:** Implement Network Access Control (NAC) to prevent unauthorized
+devices from joining internal VLANs, and enforce long complex passwords to reduce the risk of
+offline cracking if hashes are captured.
+
+**Password policy context:** `NotMyPassword0K?` appeared in the rockyou wordlist, meaning it
+cracked instantly. A truly random password of equivalent length would not be crackable offline.
+
+---
+
+## Skills Learned
+
+- Understanding LLMNR and why its lack of authentication makes it exploitable
+- Using `udp.port == 5355` to isolate LLMNR traffic and identify rogue responders
+- Identifying the Domain Controller's IP from DNS traffic to distinguish legitimate from rogue responders
+- Using DHCP hostname lookup to identify an unknown machine's operating system
+- Understanding NTLM authentication — the three-packet NEGOTIATE/CHALLENGE/AUTH flow
+- Extracting individual fields from NTLMSSP packets: server challenge, NTProofStr, NTLMv2Response
+- Assembling a crackable NTLMv2 hash from PCAP evidence
+- Using Hashcat mode 5600 to crack NetNTLMv2 hashes
+- Recognising that NTLM traffic in a Windows environment may travel over IPv6 link-local addresses
+- Correlating LLMNR, DHCP, NTLM, and SMB traffic across a single timeline to reconstruct an attack

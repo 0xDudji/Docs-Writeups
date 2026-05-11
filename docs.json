@@ -151,7 +151,11 @@
           {
             "group": "SOC",
             "root": "sherlocks/soc/index",
-            "pages": ["sherlocks/soc/telly", "sherlocks/soc/phisnet"]
+            "pages": [
+              "sherlocks/soc/telly",
+              "sherlocks/soc/phisnet",
+              "sherlocks/soc/noxious"
+            ]
           },
           {
             "group": "Malware Analysis",
